@@ -34,3 +34,58 @@ export async function addItem({ imageFile, itemJson }) {
   }
   return data.data;
 }
+
+export function buildImageUrl(path) {
+  if (!path) return '';
+  const base = (import.meta.env.NEXT_PUBLIC_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+  return path.startsWith('http') ? path : base + path;
+}
+
+export async function fetchItemsByCategory(category) {
+  const base = getBase();
+  const token = getToken();
+  const url = base + '/api/explore/get/items-by-category/' + encodeURIComponent(category);
+  const res = await fetch(url, {
+    headers: token ? { Authorization: token } : {}
+  });
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; } catch { throw new Error('Invalid JSON: ' + text); }
+  if (!res.ok || data.code !== 1) {
+    throw new Error(data?.message || 'Fetch items failed');
+  }
+  return (data.data || []).map(it => ({
+    id: it.ItemId,
+    ItemName: it.ItemName,
+    tags: it.tags || [],
+    Description: it.Description,
+    Price: it.Price,
+    ava: it.ava,
+    category: it.category,
+    image: it.ImagePath,
+    imagePreview: buildImageUrl(it.ImagePath),
+    startTime: it.startTime,
+    endTime: it.endTime,
+    canteenId: it.canteenId
+  }));
+}
+
+// Attempt to fetch categories from backend. Tries a list of possible endpoints.
+export async function fetchCategories() {
+  const base = getBase();
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = token;
+  const res = await fetch(base + '/api/explore/categories', { headers });
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; } catch { throw new Error('Invalid JSON: ' + text); }
+  if (!res.ok || data.code !== 1) throw new Error(data?.message || 'Fetch categories failed');
+  const arr = data.data || [];
+  return arr.map(c => ({
+    name: c.name || c.CategoryName || c.category || c.Category || '',
+    image: buildImageUrl(c.image || c.ImagePath || c.icon || ''),
+    itemCount: c.itemCount ?? c.count ?? c.ItemCount ?? 0,
+    raw: c
+  }));
+}
