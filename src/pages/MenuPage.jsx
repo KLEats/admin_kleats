@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { addItem, fetchItemsByCategory, fetchCategories } from '../api/items.js';
+import { addItem, fetchItemsByCategory, fetchCategories, addCategory } from '../api/items.js';
 import Layout from '../components/Layout';
 import MenuItemCard from '../components/MenuItemCard';
 import EditMenuItemModal from '../components/EditMenuItemModal';
@@ -19,6 +19,7 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [addingCategory, setAddingCategory] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -110,10 +111,28 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
     handleCloseAllModals();
   };
 
-  const handleSaveCategory = (catData) => {
+  const handleSaveCategory = async (catData) => {
     if (categories.some(c => c.name.toLowerCase() === catData.name.toLowerCase())) { alert('Category exists'); return; }
-    setCategories(prev => [...prev, { ...catData, itemCount: 0 }]);
-    handleCloseAllModals();
+    setAddingCategory(true);
+    try {
+      await addCategory({ name: catData.name, startTime: catData.startTime, endTime: catData.endTime });
+      // Refresh categories from backend for authoritative data
+      try {
+        setLoadingCategories(true);
+        const refreshed = await fetchCategories({});
+        setCategories(refreshed);
+      } catch (err) {
+        // Fallback: optimistic append
+        setCategories(prev => [...prev, { ...catData, itemCount: 0 }]);
+      } finally {
+        setLoadingCategories(false);
+      }
+      handleCloseAllModals();
+    } catch (err) {
+      alert('Add category failed: ' + err.message);
+    } finally {
+      setAddingCategory(false);
+    }
   };
 
   const itemsToShow = selectedCategory ? menuItems.filter(i => i.category === selectedCategory) : [];
@@ -156,7 +175,7 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
         </>
       )}
       {editingItem && <EditMenuItemModal item={editingItem} isAddingNew={isAddingNew} onClose={handleCloseAllModals} onSave={handleSaveItem} onDelete={handleDeleteItem} />}
-      {isCategoryModalOpen && <CategoryEditModal onClose={handleCloseAllModals} onSave={handleSaveCategory} />}
+  {isCategoryModalOpen && <CategoryEditModal onClose={handleCloseAllModals} onSave={handleSaveCategory} loading={addingCategory} />}
     </Layout>
   );
 };

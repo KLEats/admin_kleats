@@ -89,3 +89,39 @@ export async function fetchCategories() {
     raw: c
   }));
 }
+
+// Add a category: POST /api/Canteen/item/add-category with body { "category": { name, startTime, endTime } }
+export async function addCategory({ name, startTime, endTime }) {
+  if (!name) throw new Error('Category name required');
+  // Normalize times to HH:MM (drop seconds if user agent adds) and ensure 2-digit padding
+  const norm = (t) => {
+    if (!t) return '';
+    // Accept formats: HH:MM, HH:MM:SS
+    const parts = t.split(':');
+    if (parts.length >= 2) return parts[0].padStart(2,'0') + ':' + parts[1].padStart(2,'0');
+    return t; // fallback
+  };
+  const payload = {
+    category: {
+      name: name.trim(),
+      startTime: norm(startTime),
+      endTime: norm(endTime)
+    }
+  };
+  const token = getToken();
+  const res = await fetch(getBase() + '/api/Canteen/item/add-category', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: token || ''
+    },
+    body: JSON.stringify(payload)
+  });
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; } catch { throw new Error('Invalid JSON: ' + text); }
+  if (!res.ok || data.code !== 1) {
+    throw new Error(`Add category failed: status=${res.status} code=${data.code} message=${data.message || 'N/A'} body=${text.slice(0,200)}`);
+  }
+  return data.data;
+}

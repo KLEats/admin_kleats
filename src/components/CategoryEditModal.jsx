@@ -1,51 +1,31 @@
 import React, { useState, useEffect } from 'react';
 
-const CategoryEditModal = ({ category, onClose, onSave }) => {
-  const [formData, setFormData] = useState({ name: '', imageFile: null, imagePreview: '' });
+// Modal now supports adding/editing a category with fields: name, startTime, endTime
+// Backend endpoint: POST /api/Canteen/item/add-category body: { category: { name, startTime, endTime } }
+// Times are HH:MM (seconds trimmed if provided)
+const CategoryEditModal = ({ category, onClose, onSave, loading }) => {
+  const [formData, setFormData] = useState({ name: '', startTime: '', endTime: '' });
 
   useEffect(() => {
     if (category) {
       setFormData({
-        name: category.name,
-        imageFile: null,
-        imagePreview: category.image || ''
+        name: category.name || '',
+        startTime: category.startTime || '',
+        endTime: category.endTime || ''
       });
     } else {
-      setFormData({ name: '', imageFile: null, imagePreview: '' }); // Reset for adding new
+      setFormData({ name: '', startTime: '', endTime: '' });
     }
   }, [category]);
 
   const handleChange = (e) => {
-    const { name, value, files } = e.target;
-    if (name === 'imageFile' && files) {
-      const file = files[0];
-      if (file) {
-        const preview = URL.createObjectURL(file);
-        setFormData(prev => ({ ...prev, imageFile: file, imagePreview: preview }));
-      }
-      return;
-    }
+    const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const payload = {
-      name: formData.name,
-      imageFile: formData.imageFile,
-      imagePreview: formData.imagePreview
-    };
-    onSave(payload);
-    // Dummy category multipart upload example
-    /*
-    const fd = new FormData();
-    fd.append('name', payload.name);
-    if (payload.imageFile) fd.append('image', payload.imageFile);
-    fetch(`${import.meta.env.VITE_API_BASE_URL}/categories${category ? '/' + category.id : ''}`, {
-      method: category ? 'PUT' : 'POST',
-      body: fd
-    });
-    */
+    onSave({ ...formData });
   };
 
   return (
@@ -72,20 +52,32 @@ const CategoryEditModal = ({ category, onClose, onSave }) => {
               />
             </div>
 
-            {/* Image Upload */}
+            {/* Start Time */}
             <div>
-              <label htmlFor="imageFile" className="block text-sm font-medium text-gray-700">Category Image (upload)</label>
+              <label htmlFor="startTime" className="block text-sm font-medium text-gray-700">Start Time</label>
               <input
-                type="file"
-                id="imageFile"
-                name="imageFile"
-                accept="image/*"
+                type="time"
+                id="startTime"
+                name="startTime"
+                value={formData.startTime}
                 onChange={handleChange}
-                className="mt-1 block w-full text-sm"
+                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                required
               />
-              {formData.imagePreview && (
-                <img src={formData.imagePreview} alt="Preview" className="mt-2 h-24 w-24 object-cover rounded" />
-              )}
+            </div>
+
+            {/* End Time */}
+            <div>
+              <label htmlFor="endTime" className="block text-sm font-medium text-gray-700">End Time</label>
+              <input
+                type="time"
+                id="endTime"
+                name="endTime"
+                value={formData.endTime}
+                onChange={handleChange}
+                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                required
+              />
             </div>
           </div>
           
@@ -100,9 +92,10 @@ const CategoryEditModal = ({ category, onClose, onSave }) => {
             </button>
             <button
               type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              disabled={loading}
+              className={`px-4 py-2 text-sm font-medium text-white rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${loading ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'}`}
             >
-              Save Category
+              {loading ? 'Saving...' : 'Save Category'}
             </button>
           </div>
         </form>
