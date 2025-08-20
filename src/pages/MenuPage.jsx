@@ -20,6 +20,7 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [addingCategory, setAddingCategory] = useState(false);
+  const [prefetchedCounts, setPrefetchedCounts] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -38,6 +39,26 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
     return () => { active = false; };
   }, []);
 
+  // Prefetch item counts once after categories load (only for those with 0 itemCount)
+  useEffect(() => {
+    if (prefetchedCounts) return;
+    if (!categories.length) return;
+    let cancelled = false;
+    (async () => {
+      for (const cat of categories) {
+        try {
+          const items = await fetchItemsByCategory(cat.name);
+          if (cancelled) return;
+          setCategories(prev => prev.map(c => c.name === cat.name ? { ...c, itemCount: items.length } : c));
+        } catch (_) {
+          // ignore per-category error
+        }
+      }
+      if (!cancelled) setPrefetchedCounts(true);
+    })();
+    return () => { cancelled = true; };
+  }, [categories, prefetchedCounts]);
+
   const handleSelectCategory = async (name) => {
     setSelectedCategory(name);
     setLoadingItems(true);
@@ -48,6 +69,8 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
         const others = prev.filter(i => i.category !== name);
         return [...others, ...items];
       });
+  // update count for this category
+  setCategories(prev => prev.map(c => c.name === name ? { ...c, itemCount: items.length } : c));
     } catch (err) {
       alert('Fetch items failed: ' + err.message);
     } finally {
@@ -84,6 +107,10 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
             imagePreview: payload.imagePreview
         };
         setMenuItems(prev => [...prev, newItem]);
+        // increment category count if known
+        if (newItem.category) {
+          setCategories(prev => prev.map(c => c.name === newItem.category ? { ...c, itemCount: (c.itemCount || 0) + 1 } : c));
+        }
       } catch (err) {
         alert('Add item failed: ' + err.message);
         return;
