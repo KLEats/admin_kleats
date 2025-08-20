@@ -51,33 +51,35 @@ const CategoryEditModal = ({ category, onClose, onSave, loading }) => {
                 required
               />
             </div>
-
-            {/* Start Time */}
+            {/* Time Range */}
             <div>
-              <label htmlFor="startTime" className="block text-sm font-medium text-gray-700">Start Time</label>
-              <input
-                type="time"
-                id="startTime"
-                name="startTime"
-                value={formData.startTime}
-                onChange={handleChange}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                required
-              />
-            </div>
-
-            {/* End Time */}
-            <div>
-              <label htmlFor="endTime" className="block text-sm font-medium text-gray-700">End Time</label>
-              <input
-                type="time"
-                id="endTime"
-                name="endTime"
-                value={formData.endTime}
-                onChange={handleChange}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                required
-              />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Available Time Range</label>
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <input
+                    type="time"
+                    id="startTime"
+                    name="startTime"
+                    value={formData.startTime}
+                    onChange={handleChange}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    required
+                  />
+                </div>
+                <span className="text-gray-500 font-medium">to</span>
+                <div className="flex-1">
+                  <input
+                    type="time"
+                    id="endTime"
+                    name="endTime"
+                    value={formData.endTime}
+                    onChange={handleChange}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    required
+                  />
+                </div>
+              </div>
+              <p className="mt-1 text-xs text-gray-500">Set the daily availability window (24h format).</p>
             </div>
           </div>
           

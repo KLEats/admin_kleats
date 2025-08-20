@@ -86,6 +86,8 @@ export async function fetchCategories() {
     name: c.name || c.CategoryName || c.category || c.Category || '',
     image: buildImageUrl(c.image || c.ImagePath || c.icon || ''),
     itemCount: c.itemCount ?? c.count ?? c.ItemCount ?? 0,
+  startTime: c.startTime || c.StartTime || '',
+  endTime: c.endTime || c.EndTime || '',
     raw: c
   }));
 }
@@ -122,6 +124,44 @@ export async function addCategory({ name, startTime, endTime }) {
   try { data = text ? JSON.parse(text) : {}; } catch { throw new Error('Invalid JSON: ' + text); }
   if (!res.ok || data.code !== 1) {
     throw new Error(`Add category failed: status=${res.status} code=${data.code} message=${data.message || 'N/A'} body=${text.slice(0,200)}`);
+  }
+  return data.data;
+}
+
+// Update a category (name or times). Assumed endpoint; adjust if backend differs.
+export async function updateCategory(originalName, { name, startTime, endTime }) {
+  if (!originalName) throw new Error('Original category name required');
+  const norm = (t) => {
+    if (!t) return '';
+    const p = t.split(':');
+    if (p.length >= 2) return p[0].padStart(2,'0') + ':' + p[1].padStart(2,'0');
+    return t;
+  };
+  const newNameTrimmed = name?.trim();
+  const newData = {
+    startTime: norm(startTime),
+    endTime: norm(endTime)
+  };
+  // Include name only if changed (in case backend supports renaming via this endpoint)
+  if (newNameTrimmed && newNameTrimmed !== originalName) newData.name = newNameTrimmed;
+  const payload = {
+    categoryName: originalName,
+    newData
+  };
+  const token = getToken();
+  const res = await fetch(getBase() + '/api/canteen/item/edit-category', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: token || ''
+    },
+    body: JSON.stringify(payload)
+  });
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; } catch { throw new Error('Invalid JSON: ' + text); }
+  if (!res.ok || data.code !== 1) {
+    throw new Error(`Update category failed: status=${res.status} code=${data.code} message=${data.message || 'N/A'} body=${text.slice(0,200)}`);
   }
   return data.data;
 }

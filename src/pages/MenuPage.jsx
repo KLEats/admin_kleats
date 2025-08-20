@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { addItem, fetchItemsByCategory, fetchCategories, addCategory } from '../api/items.js';
+import React, { useState, useEffect, useRef } from 'react';
+import { addItem, fetchItemsByCategory, fetchCategories, addCategory, updateCategory } from '../api/items.js';
 import Layout from '../components/Layout';
 import MenuItemCard from '../components/MenuItemCard';
 import EditMenuItemModal from '../components/EditMenuItemModal';
@@ -21,6 +21,8 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [addingCategory, setAddingCategory] = useState(false);
   const [prefetchedCounts, setPrefetchedCounts] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const fetchedCountsRef = useRef(new Set());
 
   useEffect(() => {
     let active = true;
@@ -39,25 +41,24 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
     return () => { active = false; };
   }, []);
 
-  // Prefetch item counts once after categories load (only for those with 0 itemCount)
+  // Fetch item counts once per category (on first appearance or after refresh) without continuous polling
   useEffect(() => {
-    if (prefetchedCounts) return;
     if (!categories.length) return;
+    const pending = categories.filter(c => !fetchedCountsRef.current.has(c.name));
+    if (!pending.length) return;
     let cancelled = false;
     (async () => {
-      for (const cat of categories) {
+      await Promise.all(pending.map(async cat => {
         try {
           const items = await fetchItemsByCategory(cat.name);
           if (cancelled) return;
           setCategories(prev => prev.map(c => c.name === cat.name ? { ...c, itemCount: items.length } : c));
-        } catch (_) {
-          // ignore per-category error
-        }
-      }
-      if (!cancelled) setPrefetchedCounts(true);
+        } catch (_) { /* ignore */ }
+        finally { fetchedCountsRef.current.add(cat.name); }
+      }));
     })();
     return () => { cancelled = true; };
-  }, [categories, prefetchedCounts]);
+  }, [categories]);
 
   const handleSelectCategory = async (name) => {
     setSelectedCategory(name);
@@ -78,7 +79,7 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
     }
   };
   const handleBackToCategories = () => setSelectedCategory(null);
-  const handleCloseAllModals = () => { setEditingItem(null); setIsAddingNew(false); setIsCategoryModalOpen(false); };
+  const handleCloseAllModals = () => { setEditingItem(null); setIsAddingNew(false); setIsCategoryModalOpen(false); setEditingCategory(null); };
   const handleAddNewItem = () => { setIsAddingNew(true); setEditingItem({ ItemName: '', tags: [], Description: '', Price: 0, ava: true, category: selectedCategory, image: '' }); };
   const handleEditItem = (item) => { setIsAddingNew(false); setEditingItem(item); };
 
@@ -139,17 +140,44 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
   };
 
   const handleSaveCategory = async (catData) => {
+    // Editing existing
+    if (editingCategory) {
+      setAddingCategory(true);
+      try {
+        try {
+          await updateCategory(editingCategory.name, { name: catData.name, startTime: catData.startTime, endTime: catData.endTime });
+        } catch (apiErr) {
+          console.warn('Update category API failed (using local update fallback):', apiErr.message);
+        }
+        // Always refetch to ensure persisted times reflect backend normalization
+        try {
+          setLoadingCategories(true);
+          const refreshed = await fetchCategories({});
+          setCategories(refreshed);
+        } catch (err) {
+          // fallback to local update if refetch fails
+          setCategories(prev => prev.map(c => c.name === editingCategory.name ? { ...c, name: catData.name, startTime: catData.startTime, endTime: catData.endTime } : c));
+        } finally {
+          setLoadingCategories(false);
+        }
+        handleCloseAllModals();
+      } catch (err) {
+        alert('Update category failed: ' + err.message);
+      } finally {
+        setAddingCategory(false);
+      }
+      return;
+    }
+    // Adding new
     if (categories.some(c => c.name.toLowerCase() === catData.name.toLowerCase())) { alert('Category exists'); return; }
     setAddingCategory(true);
     try {
       await addCategory({ name: catData.name, startTime: catData.startTime, endTime: catData.endTime });
-      // Refresh categories from backend for authoritative data
       try {
         setLoadingCategories(true);
         const refreshed = await fetchCategories({});
         setCategories(refreshed);
       } catch (err) {
-        // Fallback: optimistic append
         setCategories(prev => [...prev, { ...catData, itemCount: 0 }]);
       } finally {
         setLoadingCategories(false);
@@ -178,7 +206,7 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
             <p className="text-sm text-gray-500">Loading categories...</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-              {categories.map(cat => <CategoryCard key={cat.name} category={cat} onSelectCategory={handleSelectCategory} />)}
+              {categories.map(cat => <CategoryCard key={cat.name} category={cat} onSelectCategory={handleSelectCategory} onEdit={(c) => { setEditingCategory(c); setIsCategoryModalOpen(true); }} />)}
             </div>
           )}
         </>
@@ -201,8 +229,8 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
           )}
         </>
       )}
-      {editingItem && <EditMenuItemModal item={editingItem} isAddingNew={isAddingNew} onClose={handleCloseAllModals} onSave={handleSaveItem} onDelete={handleDeleteItem} />}
-  {isCategoryModalOpen && <CategoryEditModal onClose={handleCloseAllModals} onSave={handleSaveCategory} loading={addingCategory} />}
+  {editingItem && <EditMenuItemModal item={editingItem} isAddingNew={isAddingNew} onClose={handleCloseAllModals} onSave={handleSaveItem} onDelete={handleDeleteItem} />}
+  {isCategoryModalOpen && <CategoryEditModal category={editingCategory} onClose={handleCloseAllModals} onSave={handleSaveCategory} loading={addingCategory} />}
     </Layout>
   );
 };
