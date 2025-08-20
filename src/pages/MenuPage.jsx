@@ -230,7 +230,15 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
         </>
       )}
   {editingItem && <EditMenuItemModal item={editingItem} isAddingNew={isAddingNew} onClose={handleCloseAllModals} onSave={handleSaveItem} onDelete={handleDeleteItem} />}
-  {isCategoryModalOpen && <CategoryEditModal category={editingCategory} onClose={handleCloseAllModals} onSave={handleSaveCategory} loading={addingCategory} />}
+  {isCategoryModalOpen && (
+    <CategoryEditModal
+      category={editingCategory}
+      onClose={handleCloseAllModals}
+      onSave={handleSaveCategory}
+      loading={addingCategory}
+      categoryNames={categories.map(c => c.name)}
+    />
+  )}
     </Layout>
   );
 };
