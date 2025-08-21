@@ -70,6 +70,40 @@ export async function fetchItemsByCategory(category) {
   }));
 }
 
+// Update an existing item via multipart form as per backend curl
+// PATCH /api/Canteen/item/updateData?id={id}
+// headers: { Authorization: <token> }
+// form: images (file, optional), json (stringified JSON with fields e.g. { Price, category, ... })
+export async function updateItem({ id, imageFile, itemJson }) {
+  if (!id && id !== 0) throw new Error('Item id is required');
+  const form = new FormData();
+  if (imageFile) form.append('images', imageFile);
+  // Keep only defined fields to avoid backend rejecting unknowns
+  const allowed = ['ItemName', 'Description', 'Price', 'ava', 'category', 'tags', 'startTime', 'endTime'];
+  const payload = {};
+  for (const k of allowed) {
+    if (typeof itemJson?.[k] !== 'undefined' && itemJson[k] !== null) payload[k] = itemJson[k];
+  }
+  form.append('json', JSON.stringify(payload));
+
+  const token = getToken();
+  const res = await fetch(getBase() + `/api/Canteen/item/updateData?id=${encodeURIComponent(id)}` , {
+    method: 'PATCH',
+    headers: {
+      Authorization: token || ''
+    },
+    body: form
+  });
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; } catch { throw new Error('Invalid JSON: ' + text); }
+  if (!res.ok || data.code !== 1) {
+    const detail = `Update item failed: status=${res.status} code=${data.code} message=${data.message || 'N/A'} body=${text.slice(0,300)}`;
+    throw new Error(detail);
+  }
+  return data.data;
+}
+
 // Attempt to fetch categories from backend. Tries a list of possible endpoints.
 export async function fetchCategories() {
   const base = getBase();

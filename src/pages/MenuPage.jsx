@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { addItem, fetchItemsByCategory, fetchCategories, addCategory, updateCategory } from '../api/items.js';
+import { addItem, fetchItemsByCategory, fetchCategories, addCategory, updateCategory, updateItem } from '../api/items.js';
 import Layout from '../components/Layout';
 import MenuItemCard from '../components/MenuItemCard';
 import EditMenuItemModal from '../components/EditMenuItemModal';
@@ -117,8 +117,43 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
         return;
       }
     } else {
-      // Local update only for now (update API logic as needed)
-      setMenuItems(prev => prev.map(i => i.id === payload.id ? { ...i, ...payload } : i));
+      try {
+        const prev = menuItems.find(i => i.id === payload.id);
+        const prevCategory = prev?.category;
+        const itemJson = {
+          ItemName: payload.ItemName,
+          tags: payload.tags,
+          Description: payload.Description,
+          Price: payload.Price,
+          ava: payload.ava,
+          category: payload.category
+        };
+        const apiData = await updateItem({ id: payload.id, imageFile: payload.imageFile, itemJson });
+        const updated = {
+          id: apiData.ItemId ?? payload.id,
+          ItemName: apiData.ItemName ?? payload.ItemName,
+          tags: apiData.tags ?? payload.tags,
+          Description: apiData.Description ?? payload.Description,
+          Price: apiData.Price ?? payload.Price,
+          ava: apiData.ava ?? payload.ava,
+          category: apiData.category ?? payload.category,
+          image: apiData.ImagePath ?? payload.image,
+          imagePreview: payload.imagePreview || apiData.ImagePath
+        };
+        setMenuItems(prev => prev.map(i => i.id === payload.id ? { ...i, ...updated } : i));
+        // If category changed, adjust counts
+        const newCategory = updated.category;
+        if (prevCategory && newCategory && prevCategory !== newCategory) {
+          setCategories(prevCats => prevCats.map(c => {
+            if (c.name === prevCategory) return { ...c, itemCount: Math.max(0, (c.itemCount || 0) - 1) };
+            if (c.name === newCategory) return { ...c, itemCount: (c.itemCount || 0) + 1 };
+            return c;
+          }));
+        }
+      } catch (err) {
+        alert('Update item failed: ' + err.message);
+        return;
+      }
     }
     handleCloseAllModals();
   };

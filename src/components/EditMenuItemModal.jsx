@@ -12,7 +12,7 @@ const EditMenuItemModal = ({ item, isAddingNew, onClose, onSave, onDelete }) => 
     ava: item?.ava ?? true,
     category: item?.category || '',
     imageFile: null,          // File object
-    imagePreview: item?.image || '', // Existing preview / legacy URL / object URL
+    imagePreview: item?.imagePreview || item?.image || '', // Existing preview / legacy URL / object URL
     id: item?.id
   });
 
@@ -25,7 +25,7 @@ const EditMenuItemModal = ({ item, isAddingNew, onClose, onSave, onDelete }) => 
       ava: item?.ava ?? true,
       category: item?.category || '',
       imageFile: null,
-      imagePreview: item?.image || '',
+      imagePreview: item?.imagePreview || item?.image || '',
       id: item?.id
     });
   }, [item]);
