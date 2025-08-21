@@ -30,7 +30,28 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
       setLoadingCategories(true);
       try {
         const cats = await fetchCategories({});
-        if (active) setCategories(cats);
+        if (!active) return;
+        if (!cats || !cats.length) {
+          setCategories([]);
+          return;
+        }
+        // Fetch item counts for all categories in parallel and apply in one update
+        try {
+          const counts = await Promise.all(cats.map(async (c) => {
+            try {
+              const items = await fetchItemsByCategory(c.name);
+              return Array.isArray(items) ? items.length : 0;
+            } catch (e) { return 0; }
+          }));
+          if (!active) return;
+          const catsWithCounts = cats.map((c, i) => ({ ...c, itemCount: counts[i] }));
+          setCategories(catsWithCounts);
+          // mark fetched counts
+          counts.forEach((_, i) => fetchedCountsRef.current.add(cats[i].name));
+        } catch (countErr) {
+          // If counts fetch fails, still set categories without counts
+          setCategories(cats);
+        }
       } catch (err) {
         console.warn('Fetch categories failed:', err.message);
         if (active) setCategories([]);
@@ -41,24 +62,7 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
     return () => { active = false; };
   }, []);
 
-  // Fetch item counts once per category (on first appearance or after refresh) without continuous polling
-  useEffect(() => {
-    if (!categories.length) return;
-    const pending = categories.filter(c => !fetchedCountsRef.current.has(c.name));
-    if (!pending.length) return;
-    let cancelled = false;
-    (async () => {
-      await Promise.all(pending.map(async cat => {
-        try {
-          const items = await fetchItemsByCategory(cat.name);
-          if (cancelled) return;
-          setCategories(prev => prev.map(c => c.name === cat.name ? { ...c, itemCount: items.length } : c));
-        } catch (_) { /* ignore */ }
-        finally { fetchedCountsRef.current.add(cat.name); }
-      }));
-    })();
-    return () => { cancelled = true; };
-  }, [categories]);
+  // counts are fetched in initial load to avoid per-category race updates
 
   const handleSelectCategory = async (name) => {
     setSelectedCategory(name);
