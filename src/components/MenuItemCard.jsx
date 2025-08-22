@@ -2,6 +2,32 @@ import React from 'react';
 
 // Displays item using backend schema fields.
 const MenuItemCard = ({ item, onEdit, onStockToggle }) => {
+  const updateStock = async (itemId, newAva) => {
+    try {
+      const base = import.meta.env.VITE_API_BASE_URL || '';
+      const url = `${base}/api/Canteen/item/updateData?id=${itemId}`;
+      const token = localStorage.getItem('authToken'); // Assuming token is stored in localStorage
+      const body = new FormData();
+      body.append('json', JSON.stringify({ ava: newAva })); // Send as form-data with key 'json'
+      const headers = token ? { Authorization: token } : {};
+
+      const response = await fetch(url, { method: 'PATCH', headers, body });
+      const result = await response.json();
+      console.log('Full response:', result); // Log the full response for debugging
+
+      if (result.code === 1) {
+        console.log('Stock updated successfully:', result.message);
+        onStockToggle(itemId, newAva); // Update parent state or re-fetch items
+      } else {
+        console.error('Failed to update stock:', result.message);
+        alert(`Failed to update stock: ${result.message}`); // Provide more descriptive error message
+      }
+    } catch (error) {
+      console.error('Error updating stock:', error);
+      alert('An error occurred while updating stock. Please try again.');
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-md overflow-hidden flex flex-col">
       <img
@@ -20,7 +46,10 @@ const MenuItemCard = ({ item, onEdit, onStockToggle }) => {
         <div className="flex-grow" />
         <div className="flex items-center justify-between mt-4">
           <span className={`text-sm font-semibold ${item.ava ? 'text-green-600' : 'text-red-600'}`}>{item.ava ? 'In Stock' : 'Out of Stock'}</span>
-          <button onClick={() => onStockToggle(item.id)} className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors duration-300 focus:outline-none ${item.ava ? 'bg-green-500' : 'bg-gray-300'}`}>
+          <button
+            onClick={() => updateStock(item.id, !item.ava)}
+            className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors duration-300 focus:outline-none ${item.ava ? 'bg-green-500' : 'bg-gray-300'}`}
+          >
             <span className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform duration-300 ${item.ava ? 'translate-x-6' : 'translate-x-1'}`} />
           </button>
         </div>
