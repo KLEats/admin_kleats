@@ -131,7 +131,66 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
         }
 
         const normalized = list.map(normalizeOrder);
-        if (mounted) setOrders(normalized);
+
+        // Enrich items with item names by fetching item details for unique item ids
+        const idSet = new Set();
+        normalized.forEach(o => {
+          if (Array.isArray(o.items)) {
+            o.items.forEach(it => {
+              const iid = it.ItemId ?? it.itemId ?? it.id ?? it.ItemID ?? null;
+              if (iid !== null && typeof iid !== 'undefined') idSet.add(iid);
+            });
+          }
+        });
+
+        const idArray = Array.from(idSet);
+        const nameCache = new Map();
+        const fetchItemName = async (itemId) => {
+          if (nameCache.has(itemId)) return nameCache.get(itemId);
+          try {
+            const base = import.meta.env.VITE_API_BASE_URL || '';
+            const token = getToken();
+            const headers = token ? { Authorization: token } : {};
+            const url = `${base}/api/explore/item?item_id=${encodeURIComponent(itemId)}`;
+            const res = await fetch(url, { headers });
+            const text = await res.text();
+            let body = null;
+            try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+            // heuristics to extract item name
+            let name = null;
+            if (body) {
+              if (body.ItemName) name = body.ItemName;
+              else if (body.name) name = body.name;
+              else if (body.data && body.data.ItemName) name = body.data.ItemName;
+              else if (body.data && body.data.name) name = body.data.name;
+              else if (Array.isArray(body) && body[0]) name = body[0].ItemName || body[0].name;
+              else if (body.data && Array.isArray(body.data) && body.data[0]) name = body.data[0].ItemName || body.data[0].name;
+            }
+            nameCache.set(itemId, name || null);
+            return name || null;
+          } catch (err) {
+            console.warn('Failed to fetch item name for', itemId, err);
+            nameCache.set(itemId, null);
+            return null;
+          }
+        };
+
+        // Fetch names in parallel (but reasonably sized)
+        if (idArray.length) {
+          await Promise.all(idArray.map(id => fetchItemName(id)));
+          // map names into orders
+          const enriched = normalized.map(o => ({
+            ...o,
+            items: Array.isArray(o.items) ? o.items.map(it => {
+              const iid = it.ItemId ?? it.itemId ?? it.id ?? it.ItemID ?? null;
+              const name = iid != null ? nameCache.get(iid) : null;
+              return { ...it, name: name || it.ItemName || it.name || null };
+            }) : []
+          }));
+          if (mounted) setOrders(enriched);
+        } else {
+          if (mounted) setOrders(normalized);
+        }
       } catch (err) {
         console.error('orders fetch error', err);
         if (mounted) {
