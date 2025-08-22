@@ -183,22 +183,46 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
     if (editingCategory) {
       setAddingCategory(true);
       try {
+        // Try to update on server and capture response
+        let apiResp = null;
         try {
-          await updateCategory(editingCategory.name, { name: catData.name, startTime: catData.startTime, endTime: catData.endTime });
+          apiResp = await updateCategory(editingCategory.name, { name: catData.name, startTime: catData.startTime, endTime: catData.endTime });
         } catch (apiErr) {
-          console.warn('Update category API failed (using local update fallback):', apiErr.message);
+          console.warn('Update category API failed (will attempt refetch or local fallback):', apiErr.message);
         }
-        // Always refetch to ensure persisted times reflect backend normalization
-        try {
-          setLoadingCategories(true);
-          const refreshed = await fetchCategories({});
-          setCategories(refreshed);
-        } catch (err) {
-          // fallback to local update if refetch fails
-          setCategories(prev => prev.map(c => c.name === editingCategory.name ? { ...c, name: catData.name, startTime: catData.startTime, endTime: catData.endTime } : c));
-        } finally {
-          setLoadingCategories(false);
+
+        // If server returned updated category, apply it locally. Otherwise try to refetch list.
+        if (apiResp) {
+          const norm = (t) => {
+            if (!t) return '';
+            const parts = String(t).split(':');
+            if (parts.length >= 2) return parts[0].padStart(2,'0') + ':' + parts[1].padStart(2,'0');
+            return String(t);
+          };
+          const updatedCat = {
+            name: apiResp.name || catData.name || editingCategory.name,
+            startTime: norm(apiResp.startTime || apiResp.start_time || catData.startTime),
+            endTime: norm(apiResp.endTime || apiResp.end_time || catData.endTime),
+          };
+          setCategories(prev => {
+            const newCats = prev.map(c => c.name === editingCategory.name ? { ...c, ...updatedCat } : c);
+            try { localStorage.setItem('kleats:categories', JSON.stringify(newCats)); } catch (e) { /* ignore */ }
+            return newCats;
+          });
+        } else {
+          // Always refetch to ensure persisted times reflect backend normalization
+          try {
+            setLoadingCategories(true);
+            const refreshed = await fetchCategories({});
+            setCategories(refreshed);
+          } catch (err) {
+            // fallback to local update if refetch fails
+            setCategories(prev => prev.map(c => c.name === editingCategory.name ? { ...c, name: catData.name, startTime: catData.startTime, endTime: catData.endTime } : c));
+          } finally {
+            setLoadingCategories(false);
+          }
         }
+
         handleCloseAllModals();
       } catch (err) {
         alert('Update category failed: ' + err.message);
