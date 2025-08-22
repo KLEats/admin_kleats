@@ -8,12 +8,17 @@ function getBase() {
 // Add new item with multipart: image file + JSON blob (without category if backend auto-assigns)
 export async function addItem({ imageFile, itemJson }) {
   if (!imageFile) throw new Error('Image file is required');
+  // Defensive: ensure the file is an image
+  if (!(imageFile.type && imageFile.type.startsWith('image/'))) {
+    throw new Error('Selected file is not an image. Please choose a JPG, PNG, WebP, SVG, etc.');
+  }
   // Build JSON payload; backend sample shows key 'ava'.
   const payload = { ...itemJson };
   // Category may be optional; if empty remove it.
   if (!payload.category) delete payload.category;
   const form = new FormData();
-  form.append('images', imageFile); // field name per curl: images
+  // Append with explicit filename to preserve extension metadata
+  form.append('images', imageFile, imageFile.name || 'upload'); // field name per curl: images
   form.append('json', JSON.stringify(payload)); // backend expects a JSON string field named json
 
   const token = getToken();
@@ -77,7 +82,12 @@ export async function fetchItemsByCategory(category) {
 export async function updateItem({ id, imageFile, itemJson }) {
   if (!id && id !== 0) throw new Error('Item id is required');
   const form = new FormData();
-  if (imageFile) form.append('images', imageFile);
+  if (imageFile) {
+    if (!(imageFile.type && imageFile.type.startsWith('image/'))) {
+      throw new Error('Selected file is not an image. Please choose a JPG, PNG, WebP, SVG, etc.');
+    }
+    form.append('images', imageFile, imageFile.name || 'upload');
+  }
   // Keep only defined fields to avoid backend rejecting unknowns
   const allowed = ['ItemName', 'Description', 'Price', 'ava', 'category', 'tags', 'startTime', 'endTime'];
   const payload = {};

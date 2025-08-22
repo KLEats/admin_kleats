@@ -11,9 +11,11 @@ const EditMenuItemModal = ({ item, isAddingNew, onClose, onSave, onDelete }) => 
     Price: item?.Price || 0,
     ava: item?.ava ?? true,
     category: item?.category || '',
-    imageFile: null,          // File object
-    imagePreview: item?.imagePreview || item?.image || '', // Existing preview / legacy URL / object URL
-    id: item?.id
+  imageFile: null,          // File object
+  imagePreview: item?.imagePreview || item?.image || '', // Existing preview / legacy URL / object URL
+  imageFileName: '',
+  imageError: '',
+  id: item?.id
   });
 
   useEffect(() => {
@@ -24,23 +26,75 @@ const EditMenuItemModal = ({ item, isAddingNew, onClose, onSave, onDelete }) => 
       Price: item?.Price || 0,
       ava: item?.ava ?? true,
       category: item?.category || '',
-      imageFile: null,
-      imagePreview: item?.imagePreview || item?.image || '',
-      id: item?.id
+  imageFile: null,
+  imagePreview: item?.imagePreview || item?.image || '',
+  imageFileName: '',
+  imageError: '',
+  id: item?.id
     });
   }, [item]);
 
   const handleChange = (e) => {
     const { name, value, type, checked, files } = e.target;
     if (name === 'imageFile' && files) {
-      const file = files[0];
-      if (file) {
-        const preview = URL.createObjectURL(file);
-        setFormData(prev => ({ ...prev, imageFile: file, imagePreview: preview }));
-      }
+      // handle image selection and convert non-jpeg/png to jpeg
+      (async () => {
+        const file = files[0];
+        if (!file) return;
+        const isImage = file.type && file.type.startsWith('image/');
+        if (!isImage) {
+          setFormData(prev => ({ ...prev, imageFile: null, imagePreview: '', imageFileName: '', imageError: 'Please select an image file (jpg, png, webp, svg, etc.)' }));
+          return;
+        }
+        try {
+          let finalFile = file;
+          // convert if not jpeg or png
+          if (!(file.type === 'image/jpeg' || file.type === 'image/png')) {
+            finalFile = await convertImageToJpeg(file);
+          }
+          const preview = URL.createObjectURL(finalFile);
+          setFormData(prev => ({ ...prev, imageFile: finalFile, imagePreview: preview, imageFileName: finalFile.name, imageError: '' }));
+        } catch (err) {
+          console.error('Image conversion failed', err);
+          setFormData(prev => ({ ...prev, imageFile: null, imagePreview: '', imageFileName: '', imageError: 'Failed to convert image to JPG' }));
+        }
+      })();
       return;
     }
     setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+  };
+
+  // Convert an image File (webp/svg/etc.) to JPEG using canvas.
+  const convertImageToJpeg = async (file) => {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          const w = img.naturalWidth || img.width || 800;
+          const h = img.naturalHeight || img.height || 600;
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          // draw white background to avoid transparency issues
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0, w, h);
+          canvas.toBlob((blob) => {
+            if (!blob) { URL.revokeObjectURL(url); return reject(new Error('Conversion produced no blob')); }
+            const jpgFile = new File([blob], (file.name.replace(/\.[^/.]+$/, '') || 'image') + '.jpg', { type: 'image/jpeg' });
+            URL.revokeObjectURL(url);
+            resolve(jpgFile);
+          }, 'image/jpeg', 0.92);
+        } catch (err) {
+          URL.revokeObjectURL(url);
+          reject(err);
+        }
+      };
+      img.onerror = (e) => { URL.revokeObjectURL(url); reject(new Error('Image load error')); };
+      img.src = url;
+    });
   };
 
   const handleSubmit = (e) => {
@@ -131,9 +185,12 @@ const EditMenuItemModal = ({ item, isAddingNew, onClose, onSave, onDelete }) => 
             <div>
               <label htmlFor="imageFile" className="block text-sm font-medium text-gray-700">Image (upload)</label>
               <input id="imageFile" name="imageFile" type="file" accept="image/*" onChange={handleChange} className="mt-1 block w-full text-sm text-gray-700" />
-              {formData.imagePreview && (
+              {formData.imagePreview ? (
                 <img src={formData.imagePreview} alt="Preview" className="mt-2 h-32 w-full object-cover rounded border" onError={(e)=>{e.target.style.display='none';}} />
+              ) : (
+                formData.imageFileName && <p className="mt-2 text-sm text-gray-600">Selected file: {formData.imageFileName}</p>
               )}
+              {formData.imageError && <p className="mt-2 text-sm text-red-600">{formData.imageError}</p>}
             </div>
           </div>
           <div className="mt-6 flex justify-between items-center">
