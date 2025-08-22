@@ -110,7 +110,7 @@ const ExportControl = ({ filteredOrders }) => {
 };
 import Layout from '../components/Layout';
 import OrderFilters from '../components/OrderFilters';
-import OrderHistoryTable from '../components/OrderHistoryTable';
+import OrderHistoryTable, { usernameCache as sharedUsernameCache } from '../components/OrderHistoryTable';
 
 // Helper function to format a Date object into a 'YYYY-MM-DD' string
 const formatDateForInput = (date) => {
@@ -272,7 +272,7 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
 
         const normalized = list.map(normalizeOrder);
 
-        // Enrich items with item names by fetching item details for unique item ids
+  // Enrich items with item names by fetching item details for unique item ids
         const idSet = new Set();
         normalized.forEach(o => {
           if (Array.isArray(o.items)) {
@@ -327,6 +327,43 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
               return { ...it, name: name || it.ItemName || it.name || null };
             }) : []
           }));
+          // Before setting orders, bulk-prefetch usernames for the orders to avoid many per-row calls
+          const userIdSet = new Set();
+          enriched.forEach(o => { if (o.userId) userIdSet.add(o.userId); });
+          const userIdsToFetch = Array.from(userIdSet).filter(uid => !sharedUsernameCache.has(uid));
+          if (userIdsToFetch.length) {
+            // fetch all user details in parallel (small batch)
+            await Promise.all(userIdsToFetch.map(async (uid) => {
+              try {
+                const base = import.meta.env.VITE_API_BASE_URL || '';
+                const token = getToken();
+                const headers = token ? { Authorization: token } : {};
+                const url = `${base}/api/Canteen/user/get-user-details?userId=${encodeURIComponent(uid)}`;
+                const res = await fetch(url, { headers });
+                const text = await res.text();
+                let body = null;
+                try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+                let details = null;
+                if (body) {
+                  // prefer body.data if present
+                  const src = body.data || body;
+                  details = {
+                    name: src.name || src.username || `#${uid}`,
+                    email: src.email || null,
+                    phoneNo: src.phoneNo || src.phone || null,
+                    role: src.role || null,
+                    DayOrHos: src.DayOrHos || null
+                  };
+                }
+                if (!details) details = { name: `#${uid}` };
+                sharedUsernameCache.set(uid, details);
+              } catch (err) {
+                console.warn('bulk fetch username failed for', uid, err);
+                sharedUsernameCache.set(uid, `#${uid}`);
+              }
+            }));
+          }
+
           if (mounted) setOrders(enriched);
         } else {
           if (mounted) setOrders(normalized);
