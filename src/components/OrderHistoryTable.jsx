@@ -1,4 +1,63 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { getToken } from '../api/auth';
+
+// Simple in-memory cache for usernames
+const usernameCache = new Map();
+
+const UserIdCell = ({ userId }) => {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [name, setName] = useState(() => usernameCache.get(userId) || null);
+
+  const fetchName = async () => {
+    if (usernameCache.has(userId)) {
+      setName(usernameCache.get(userId));
+      setOpen(true);
+      return;
+    }
+    setLoading(true);
+    try {
+      const base = import.meta.env.VITE_API_BASE_URL || '';
+      const token = getToken();
+      const headers = token ? { Authorization: token } : {};
+      // heuristic endpoint — adjust if your API differs
+      const url = `${base}/api/user/details?user_id=${encodeURIComponent(userId)}`;
+      const res = await fetch(url, { headers });
+      const text = await res.text();
+      let body = null;
+      try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+      let found = null;
+      if (body) {
+        if (body.name) found = body.name;
+        else if (body.username) found = body.username;
+        else if (body.data && (body.data.name || body.data.username)) found = body.data.name || body.data.username;
+      }
+      usernameCache.set(userId, found || `#${userId}`);
+      setName(found || `#${userId}`);
+      setOpen(true);
+    } catch (err) {
+      console.warn('failed to fetch username', err);
+      usernameCache.set(userId, `#${userId}`);
+      setName(`#${userId}`);
+      setOpen(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="relative inline-block">
+      <button className="text-blue-600 underline text-sm" onClick={() => { if (!open) fetchName(); else setOpen(false); }}>
+        {userId}
+      </button>
+      {open && (
+        <div className="absolute z-10 mt-1 bg-white border rounded shadow p-2 text-sm w-48">
+          {loading ? 'Loading...' : (name || 'Unknown')}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const OrderHistoryTable = ({ orders }) => {
 
@@ -40,7 +99,11 @@ const OrderHistoryTable = ({ orders }) => {
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{Array.isArray(order.canteenId) ? order.canteenId.join(', ') : (order.canteenId ?? '-')}</td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{order.orderTime ? new Date(order.orderTime).toLocaleString() : '-'}</td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{order.deliveryTime ? new Date(order.deliveryTime).toLocaleString() : '-'}</td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{order.userId ?? '-'}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
+                  {order.userId ? (
+                    <UserIdCell userId={order.userId} />
+                  ) : ('-')}
+                </td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 max-w-xs">
                   {order.items && order.items.length ? (
                     <div className="max-h-40 overflow-auto text-xs space-y-1">

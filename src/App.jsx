@@ -6,7 +6,7 @@ import LoginPage from './pages/LoginPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import MenuPage from './pages/MenuPage.jsx';
 import OrdersPage from './pages/OrdersPage.jsx';
-import ReportsPage from './pages/ReportsPage.jsx'; // Import the new ReportsPage
+// ReportsPage removed; export functionality moved to OrdersPage
 
 // --- Main App Component ---
 export default function App() {
@@ -48,7 +48,8 @@ export default function App() {
       case 'orders':
         return <OrdersPage onLogout={handleLogout} navigateTo={navigateTo} currentPage={currentPage} />;
       case 'reports':
-        return <ReportsPage onLogout={handleLogout} navigateTo={navigateTo} currentPage={currentPage} />;
+        // Show orders page for reports navigation (export available from Orders)
+        return <OrdersPage onLogout={handleLogout} navigateTo={navigateTo} currentPage={currentPage} />;
       default:
         return <DashboardPage onLogout={handleLogout} navigateTo={navigateTo} currentPage={currentPage} />;
     }
