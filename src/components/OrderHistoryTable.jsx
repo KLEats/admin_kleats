@@ -123,8 +123,6 @@ const OrderHistoryTable = ({ orders }) => {
         <thead className="bg-gray-50">
             <tr>
             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order ID</th>
-            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Transaction ID</th>
-            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Canteen ID</th>
             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order Time</th>
             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Delivery Time</th>
             <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">USER</th>
@@ -139,9 +137,6 @@ const OrderHistoryTable = ({ orders }) => {
             orders.map((order) => (
               <tr key={order.id || order.orderId || order.transactionId} className="hover:bg-gray-50 align-top">
                 <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{order.orderId ?? order.id}</td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{order.transactionId || '-'}</td>
-                {/* Status column removed as requested */}
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{Array.isArray(order.canteenId) ? order.canteenId.join(', ') : (order.canteenId ?? '-')}</td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{order.orderTime ? new Date(order.orderTime).toLocaleString() : '-'}</td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{order.deliveryTime ? new Date(order.deliveryTime).toLocaleString() : '-'}</td>
                 <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
