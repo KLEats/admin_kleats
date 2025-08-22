@@ -173,6 +173,37 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
     return sum + (parseFloat(parcelPrice || 0) || 0);
   };
 
+  // Convert various backend status/payment representations into canonical labels
+  // Returns one of: 'delivered', 'charged', 'pending', 'refunded' or '' when unknown
+  const canonicalizeStatus = (val) => {
+    if (val === null || typeof val === 'undefined') return '';
+    // numeric codes
+    if (typeof val === 'number') {
+      // common heuristics: 2 -> delivered, 1 -> charged/paid, 0 -> pending, 3 -> refunded
+      if (val === 2) return 'delivered';
+      if (val === 1) return 'charged';
+      if (val === 0) return 'pending';
+      if (val === 3) return 'refunded';
+      return '';
+    }
+    const s = String(val).trim().toLowerCase();
+    if (!s) return '';
+    // handle numeric strings
+    if (/^\d+$/.test(s)) {
+      const n = parseInt(s, 10);
+      if (n === 2) return 'delivered';
+      if (n === 1) return 'charged';
+      if (n === 0) return 'pending';
+      if (n === 3) return 'refunded';
+    }
+    // textual heuristics
+    if (/deliver|complete|served|fulfilled/.test(s)) return 'delivered';
+    if (/paid|charge|charged|success|settled/.test(s)) return 'charged';
+    if (/pending|wait|created|initiated|inprogress|processing/.test(s)) return 'pending';
+    if (/refund|refunded|reversed|cancel|cancelled|canceled/.test(s)) return 'refunded';
+    return '';
+  };
+
   const normalizeOrder = (o) => {
     const now = new Date();
     const orderId = o.orderId ?? o.order_id ?? o.id ?? null;
@@ -315,15 +346,23 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
 
   // --- THE CORRECTED FILTERING LOGIC IS HERE ---
   const filteredOrders = useMemo(() => {
-    // We'll filter by paymentStatus (case-insensitive) and then sort by a fixed priority
-    const statusFilter = String(filters.status || 'All').toLowerCase();
+    // Use canonicalized statuses so UI "Delivered" matches whatever shape backend uses.
+    const rawStatusFilter = String(filters.status || 'All').toLowerCase();
+    const statusFilterCanon = rawStatusFilter === 'all' ? null : (canonicalizeStatus(rawStatusFilter) || rawStatusFilter);
     const priority = ['charged', 'delivered', 'pending', 'refunded'];
 
     const typeFilter = String(filters.type || 'All').toLowerCase();
 
     const filtered = orders.filter(order => {
-      const payment = String(order.paymentStatus || order.raw?.paymentStatus || order.raw?.payment_status || '').toLowerCase();
-      if (statusFilter !== 'all' && payment !== statusFilter) return false;
+      const paymentRaw = order.paymentStatus ?? order.raw?.paymentStatus ?? order.raw?.payment_status ?? order.raw?.payment ?? '';
+      const statusRaw = order.status ?? order.raw?.status ?? '';
+      const paymentCanon = canonicalizeStatus(paymentRaw) || '';
+      const statusCanon = canonicalizeStatus(statusRaw) || '';
+
+      // If a status is selected, require PAYMENT STATUS (canonicalized) to match.
+      if (statusFilterCanon !== null) {
+        if (paymentCanon !== statusFilterCanon) return false;
+      }
 
       const orderType = String(order.orderType || order.raw?.orderType || order.raw?.type || '').toLowerCase();
       if (typeFilter !== 'all' && orderType !== typeFilter) return false;
@@ -331,12 +370,14 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
       return true;
     });
 
-    // sort by priority index (unknown statuses go to end)
+    // Sort using canonicalized statuses
     filtered.sort((a, b) => {
-      const pa = String(a.paymentStatus || a.raw?.paymentStatus || a.raw?.payment_status || '').toLowerCase();
-      const pb = String(b.paymentStatus || b.raw?.paymentStatus || b.raw?.payment_status || '').toLowerCase();
-      const ia = priority.indexOf(pa);
-      const ib = priority.indexOf(pb);
+      const aRaw = a.paymentStatus ?? a.raw?.paymentStatus ?? a.raw?.payment_status ?? a.status ?? a.raw?.status ?? '';
+      const bRaw = b.paymentStatus ?? b.raw?.paymentStatus ?? b.raw?.payment_status ?? b.status ?? b.raw?.status ?? '';
+      const aCanon = canonicalizeStatus(aRaw) || '';
+      const bCanon = canonicalizeStatus(bRaw) || '';
+      const ia = priority.indexOf(aCanon);
+      const ib = priority.indexOf(bCanon);
       if (ia === -1 && ib === -1) return 0;
       if (ia === -1) return 1;
       if (ib === -1) return -1;

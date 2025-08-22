@@ -65,8 +65,9 @@ const Sidebar = ({ metrics, onLogout, navigateTo, currentPage }) => {
     let mounted = true;
     (async () => {
       try {
-        const base = import.meta.env.VITE_API_BASE_URL || '';
-        const url = `${base}/api/Canteen/order/list?offset=0&limit=1000`;
+  const base = import.meta.env.VITE_API_BASE_URL || '';
+  // Use the server-side delivered orders endpoint to ensure we only aggregate delivered orders
+  const url = `${base}/api/Canteen/order/delivered?offset=0&limit=1000`;
         const token = getToken();
         const headers = token ? { Authorization: token } : {};
         const res = await fetch(url, { headers });
@@ -96,9 +97,6 @@ const Sidebar = ({ metrics, onLogout, navigateTo, currentPage }) => {
         let todayOrders = 0;
 
         list.forEach(o => {
-          // only include delivered orders in the sales totals
-          if (!isDeliveredOrder(o)) return;
-
           const t = o.orderTime ?? o.order_time ?? o.createdAt ?? null;
           const date = t ? new Date(t) : null;
           const items = parseItemsField(o.items ?? o.orderItems ?? o.itemsJson);
