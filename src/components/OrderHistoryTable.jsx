@@ -18,31 +18,49 @@ const OrderHistoryTable = ({ orders }) => {
       <table className="min-w-full bg-white divide-y divide-gray-200">
         <thead className="bg-gray-50">
           <tr>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order ID</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order ID</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Transaction ID</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Canteen ID</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order Time</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Delivery Time</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User ID</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Items</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Order Type</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Parcel Price</th>
+            <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Payment Status</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
           {orders.length > 0 ? (
             orders.map((order) => (
-              <tr key={order.id} className="hover:bg-gray-50">
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{order.id}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{new Date(order.date).toLocaleDateString()}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{order.customer}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">₹{order.total.toFixed(2)}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm">
+              <tr key={order.id || order.orderId || order.transactionId} className="hover:bg-gray-50 align-top">
+                <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{order.orderId ?? order.id}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{order.transactionId || '-'}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm">
                   <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusPillStyle(order.status)}`}>
                     {order.status}
                   </span>
                 </td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{Array.isArray(order.canteenId) ? order.canteenId.join(', ') : (order.canteenId ?? '-')}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{order.orderTime ? new Date(order.orderTime).toLocaleString() : '-'}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{order.deliveryTime ? new Date(order.deliveryTime).toLocaleString() : '-'}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{order.userId ?? '-'}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 max-w-xs">
+                  {order.items && order.items.length ? (
+                    <pre className="whitespace-pre-wrap max-h-40 overflow-auto text-xs">{JSON.stringify(order.items, null, 2)}</pre>
+                  ) : (
+                    <span className="text-xs text-gray-500">No items</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{order.orderType}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">₹{(parseFloat(order.parcelPrice || 0) || 0).toFixed(2)}</td>
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">{order.paymentStatus}</td>
               </tr>
             ))
           ) : (
             <tr>
-              <td colSpan="5" className="px-6 py-12 text-center text-sm text-gray-500">
+              <td colSpan="11" className="px-6 py-12 text-center text-sm text-gray-500">
                 No orders found for the selected filters.
               </td>
             </tr>
