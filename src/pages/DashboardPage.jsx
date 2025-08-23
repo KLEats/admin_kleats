@@ -131,6 +131,39 @@ const DashboardPage = ({ onLogout, navigateTo, currentPage }) => {
           }));
         }
 
+        // Collect unique itemIds to fetch item names in bulk
+        const itemIdSet = new Set();
+        list.forEach(o => {
+          const rawItems = o.items ?? o.orderItems ?? o.order_items ?? o.cart ?? o.line_items ?? [];
+          if (Array.isArray(rawItems)) rawItems.forEach(it => {
+            const iid = it.itemId ?? it.id ?? it.ItemId ?? it.ItemID ?? null;
+            if (iid !== undefined && iid !== null) itemIdSet.add(String(iid));
+          });
+        });
+
+        const itemMap = new Map();
+        if (itemIdSet.size) {
+          await Promise.all(Array.from(itemIdSet).map(async (iid) => {
+            try {
+              const iurl = `${base}/api/explore/item?item_id=${encodeURIComponent(iid)}`;
+              const r = await fetch(iurl, { headers });
+              const t = await r.text();
+              let b = null;
+              try { b = t ? JSON.parse(t) : null; } catch { b = t; }
+              let iname = null;
+              if (b) {
+                if (b.ItemName) iname = b.ItemName;
+                else if (b.name) iname = b.name;
+                else if (b.data && (b.data.ItemName || b.data.name)) iname = b.data.ItemName || b.data.name;
+                else if (b.data && b.data.item && (b.data.item.ItemName || b.data.item.name)) iname = b.data.item.ItemName || b.data.item.name;
+              }
+              itemMap.set(String(iid), iname || `#${iid}`);
+            } catch (err) {
+              itemMap.set(String(iid), `#${iid}`);
+            }
+          }));
+        }
+
         // Map and filter actionable orders (payment charged and not delivered/cancelled)
         const actionable = (list || []).map(o => {
           const orderId = o.orderId ?? o.id ?? o.order_id ?? (o.transactionId ? `ORD-${o.transactionId}` : null);
@@ -147,12 +180,27 @@ const DashboardPage = ({ onLogout, navigateTo, currentPage }) => {
           const displayStatus = actionableFlag ? 'Preparing' : statusRaw || '';
           const type = /parcel|pickup|takeaway|takeway/i.test(o.orderType || o.type || '') ? 'Parcel' : 'Dine-in';
           const deliveryTime = o.deliveryTime ?? o.expectedDeliveryTime ?? o.orderTime ?? o.updatedAt ?? null;
+          // normalize items if present on the payload so modal can show them
+          const rawItems = o.items ?? o.orderItems ?? o.order_items ?? o.cart ?? o.line_items ?? [];
+          const items = Array.isArray(rawItems) ? rawItems.map(it => {
+            const iid = it.itemId ?? it.id ?? it.ItemId ?? it.ItemID ?? Math.random().toString(36).slice(2,8);
+            const key = String(iid);
+            const resolvedName = it.name ?? it.ItemName ?? itemMap.get(key) ?? `#${iid}`;
+            return {
+              id: iid,
+              name: resolvedName,
+              price: parseFloat(it.price ?? it.Price ?? it.rate ?? 0) || 0,
+              quantity: it.quantity ?? it.qty ?? it.Quantity ?? 1,
+            };
+          }) : [];
+
           return {
             id: orderId || `#${o.id || Math.random().toString(36).slice(2,8)}`,
             customer,
             status: displayStatus,
             type,
             deliveryTime,
+            items,
             _actionable: actionableFlag,
           };
         }).filter(o => o._actionable);
