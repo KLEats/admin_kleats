@@ -45,7 +45,12 @@ const MenuItemCard = ({ item, onEdit, onStockToggle }) => {
         </div>
         <div className="flex-grow" />
         <div className="flex items-center justify-between mt-4">
-          <span className={`text-sm font-semibold ${item.ava ? 'text-green-600' : 'text-red-600'}`}>{item.ava ? 'In Stock' : 'Out of Stock'}</span>
+          <div className="flex items-center gap-3">
+            <span className={`text-sm font-semibold ${item.ava ? 'text-green-600' : 'text-red-600'}`}>{item.ava ? 'In Stock' : 'Out of Stock'}</span>
+            {item._availability && item._availability.reason === 'out_of_hours' && (
+              <span className="text-xs px-2 py-0.5 rounded bg-yellow-100 text-yellow-800 font-medium">Out of hours</span>
+            )}
+          </div>
           <button
             onClick={() => updateStock(item.id, !item.ava)}
             className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors duration-300 focus:outline-none ${item.ava ? 'bg-green-500' : 'bg-gray-300'}`}

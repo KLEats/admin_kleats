@@ -47,11 +47,8 @@ const EditMenuItemModal = ({ item, isAddingNew, onClose, onSave, onDelete }) => 
           return;
         }
         try {
-          let finalFile = file;
-          // convert if not jpeg or png
-          if (!(file.type === 'image/jpeg' || file.type === 'image/png')) {
-            finalFile = await convertImageToJpeg(file);
-          }
+          // Compress/convert to JPEG and target ~50KB. convertImageToJpeg will return original file if already under limit.
+          const finalFile = await convertImageToJpeg(file, 50 * 1024);
           const preview = URL.createObjectURL(finalFile);
           setFormData(prev => ({ ...prev, imageFile: finalFile, imagePreview: preview, imageFileName: finalFile.name, imageError: '' }));
         } catch (err) {
@@ -64,12 +61,19 @@ const EditMenuItemModal = ({ item, isAddingNew, onClose, onSave, onDelete }) => 
     setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
   };
 
-  // Convert an image File (webp/svg/etc.) to JPEG using canvas.
-  const convertImageToJpeg = async (file) => {
+  // Convert and compress an image File to JPEG using canvas.
+  // Attempts to produce a JPEG file under maxBytes using a binary-search over quality.
+  // If original file is already smaller than maxBytes, returns original file.
+  const convertImageToJpeg = async (file, maxBytes = 50 * 1024) => {
+    // If already small enough, return original file
+    try {
+      if (file.size && file.size <= maxBytes) return file;
+    } catch (e) { /* ignore */ }
+
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
-      img.onload = () => {
+      img.onload = async () => {
         try {
           const canvas = document.createElement('canvas');
           const w = img.naturalWidth || img.width || 800;
@@ -81,12 +85,39 @@ const EditMenuItemModal = ({ item, isAddingNew, onClose, onSave, onDelete }) => 
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, w, h);
           ctx.drawImage(img, 0, 0, w, h);
-          canvas.toBlob((blob) => {
-            if (!blob) { URL.revokeObjectURL(url); return reject(new Error('Conversion produced no blob')); }
-            const jpgFile = new File([blob], (file.name.replace(/\.[^/.]+$/, '') || 'image') + '.jpg', { type: 'image/jpeg' });
-            URL.revokeObjectURL(url);
-            resolve(jpgFile);
-          }, 'image/jpeg', 0.92);
+
+          const toBlob = (quality) => new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+
+          // Binary search for a quality that yields <= maxBytes (8 iterations)
+          let minQ = 0.35, maxQ = 0.92, bestBlob = null;
+          for (let i = 0; i < 8; i++) {
+            const q = (minQ + maxQ) / 2;
+            /* eslint-disable no-await-in-loop */
+            const blob = await toBlob(q);
+            /* eslint-enable no-await-in-loop */
+            if (!blob) break;
+            if (blob.size <= maxBytes) {
+              bestBlob = blob; // acceptable
+              // try higher quality
+              minQ = q;
+            } else {
+              // too large -> reduce quality
+              maxQ = q;
+            }
+          }
+
+          // If we didn't find a good blob, fall back to the smallest-quality blob we obtained
+          if (!bestBlob) {
+            // final attempt at minQ
+            const final = await toBlob(minQ);
+            if (final) bestBlob = final;
+          }
+
+          if (!bestBlob) { URL.revokeObjectURL(url); return reject(new Error('Conversion produced no blob')); }
+
+          const jpgFile = new File([bestBlob], (file.name.replace(/\.[^/.]+$/, '') || 'image') + '.jpg', { type: 'image/jpeg' });
+          URL.revokeObjectURL(url);
+          resolve(jpgFile);
         } catch (err) {
           URL.revokeObjectURL(url);
           reject(err);

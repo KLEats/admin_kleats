@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { addItem, fetchItemsByCategory, fetchCategories, addCategory, updateCategory, updateItem } from '../api/items.js';
 import Layout from '../components/Layout';
 import MenuItemCard from '../components/MenuItemCard';
+import { itemAvailability } from '../utils/availability';
 import EditMenuItemModal from '../components/EditMenuItemModal';
 import CategoryCard from '../components/CategoryCard';
 import CategoryEditModal from '../components/CategoryEditModal';
@@ -69,11 +70,18 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
     setLoadingItems(true);
     try {
       const items = await fetchItemsByCategory(name);
-      setMenuItems(prev => {
-        // Remove old items of this category then add fresh ones
-        const others = prev.filter(i => i.category !== name);
-        return [...others, ...items];
-      });
+      // If server returned no items, keep existing items for this category instead of removing them
+      if (!Array.isArray(items) || items.length === 0) {
+        // don't overwrite existing items — just update counts if needed
+        setCategories(prev => prev.map(c => c.name === name ? { ...c, itemCount: 0 } : c));
+      } else {
+        setMenuItems(prev => {
+          const others = prev.filter(i => i.category !== name);
+          return [...others, ...items];
+        });
+        // update count for this category
+        setCategories(prev => prev.map(c => c.name === name ? { ...c, itemCount: items.length } : c));
+      }
   // update count for this category
   setCategories(prev => prev.map(c => c.name === name ? { ...c, itemCount: items.length } : c));
     } catch (err) {
@@ -253,7 +261,13 @@ const MenuPage = ({ onLogout, navigateTo, currentPage }) => {
     }
   };
 
-  const itemsToShow = selectedCategory ? menuItems.filter(i => i.category === selectedCategory) : [];
+  // Build itemsToShow but keep last-known items if server returns empty; also annotate availability
+  const itemsToShow = selectedCategory ? menuItems
+    .filter(i => i.category === selectedCategory)
+    .map(i => ({
+      ...i,
+      _availability: itemAvailability(i, categories.find(c => c.name === selectedCategory) || {}),
+    })) : [];
 
   const [loadingItems, setLoadingItems] = useState(false);
 

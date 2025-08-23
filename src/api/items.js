@@ -56,10 +56,24 @@ export async function fetchItemsByCategory(category) {
   const text = await res.text();
   let data;
   try { data = text ? JSON.parse(text) : {}; } catch { throw new Error('Invalid JSON: ' + text); }
+  // If server responded 304 Not Modified, or returned an empty array,
+  // try to fall back to a cached copy for this category so the UI doesn't go blank.
+  const cacheKey = `kleats:items:${category}`;
+
+  if (res.status === 304) {
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) return JSON.parse(cached);
+    } catch (e) { /* ignore cache errors */ }
+    // If no cache, treat as empty
+    return [];
+  }
+
   if (!res.ok || data.code !== 1) {
     throw new Error(data?.message || 'Fetch items failed');
   }
-  return (data.data || []).map(it => ({
+
+  const mapped = (data.data || []).map(it => ({
     id: it.ItemId,
     ItemName: it.ItemName,
     tags: it.tags || [],
@@ -73,6 +87,22 @@ export async function fetchItemsByCategory(category) {
     endTime: it.endTime,
     canteenId: it.canteenId
   }));
+
+  // If server returned items, cache them for the category. If empty array, try cache fallback.
+  try {
+    if (mapped && mapped.length) {
+      localStorage.setItem(cacheKey, JSON.stringify(mapped));
+      return mapped;
+    }
+    // mapped is empty; try cached fallback before returning empty
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      try { return JSON.parse(cached); } catch (e) { /* fallthrough */ }
+    }
+    return [];
+  } catch (e) {
+    return mapped;
+  }
 }
 
 // Update an existing item via multipart form as per backend curl
