@@ -9,32 +9,31 @@ const TimeLeftDisplay = ({ deliveryTime }) => {
   }, []);
 
   const calculateTimeLeft = () => {
+    if (!deliveryTime) return { text: '-', color: 'text-gray-500' };
     const difference = new Date(deliveryTime) - currentTime;
-    if (difference <= 0) return { text: "Due Now", color: "text-red-600 animate-pulse" };
+    if (difference <= 0) return { text: 'Due Now', color: 'text-red-500' };
     const hours = Math.floor((difference / (1000 * 60 * 60)) % 24);
     const minutes = Math.floor((difference / 1000 / 60) % 60);
     let text = '';
     if (hours > 0) text += `${hours}hr `;
     if (minutes > 0 || hours === 0) text += `${minutes}min`;
-    let color = "text-green-600";
-    if (hours === 0 && minutes < 15) color = "text-orange-500";
-    if (hours === 0 && minutes < 5) color = "text-red-600";
+    const color = hours === 0 && minutes < 5 ? 'text-red-500' : (hours === 0 && minutes < 15 ? 'text-orange-500' : 'text-gray-700');
     return { text: `${text.trim()} left`, color };
   };
 
   const { text, color } = calculateTimeLeft();
-  return <p className={`text-sm font-bold ${color}`}>{text}</p>;
+  return <p className={`text-sm font-semibold ${color}`}>{text}</p>;
 };
 
 const LiveOrderFeed = ({ orders, onSelectOrder }) => {
-  const pendingOrders = orders
-    .filter(order => order.status === 'Preparing')
+  const pendingOrders = (orders || [])
+    .filter(order => String(order.status).toLowerCase() === 'preparing')
     .sort((a, b) => new Date(a.deliveryTime) - new Date(b.deliveryTime));
 
   const getTypePillStyle = (type) => {
     return type === 'Dine-in'
-      ? 'bg-purple-100 text-purple-800'
-      : 'bg-orange-100 text-orange-800';
+      ? 'bg-white border border-purple-200 text-purple-800'
+      : 'bg-white border border-orange-200 text-orange-800';
   };
 
   return (
@@ -45,20 +44,21 @@ const LiveOrderFeed = ({ orders, onSelectOrder }) => {
           pendingOrders.map((order) => (
             <button
               key={order.id}
-              onClick={() => onSelectOrder(order)}
-              className="w-full text-left flex items-center justify-between p-4 bg-gray-50 hover:bg-indigo-50 rounded-xl transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              onClick={() => onSelectOrder && onSelectOrder(order)}
+              className="w-full text-left p-0 bg-transparent hover:shadow-sm rounded-lg focus:outline-none"
             >
-              <div>
-                <p className="font-semibold text-gray-800">{order.id} - <span className="font-normal">{order.customer}</span></p>
-                <TimeLeftDisplay deliveryTime={order.deliveryTime} />
-              </div>
-              <div className="flex flex-col items-end space-y-2">
-                <span className="px-3 py-1 text-xs font-bold rounded-full ring-1 ring-inset bg-blue-100 text-blue-800">
-                  Preparing
-                </span>
-                <span className={`px-3 py-1 text-xs font-bold rounded-full ring-1 ring-inset ${getTypePillStyle(order.type)}`}>
-                  {order.type}
-                </span>
+              <div className="w-full bg-indigo-50 rounded-lg p-4 flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="text-lg md:text-xl font-semibold text-gray-800 truncate">{order.id} <span className="font-normal text-gray-700">- {order.customer}</span></p>
+                  <div className="mt-2">
+                    <TimeLeftDisplay deliveryTime={order.deliveryTime} />
+                  </div>
+                </div>
+
+                <div className="flex flex-col items-end ml-4 space-y-2">
+                  <span className="px-3 py-1 text-xs font-semibold rounded-full bg-white border border-blue-200 text-blue-800 shadow-sm">Preparing</span>
+                  <span className={`px-3 py-1 text-xs font-semibold rounded-full ${getTypePillStyle(order.type)}`}>{order.type}</span>
+                </div>
               </div>
             </button>
           ))

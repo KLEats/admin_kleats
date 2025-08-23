@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 // --- Component Imports ---
 import Layout from '../components/Layout';
@@ -55,7 +55,20 @@ const DashboardPage = ({ onLogout, navigateTo, currentPage }) => {
   const [selectedOrder, setSelectedOrder] = useState(null); // State for the selected order
 
   const handleSelectOrder = (order) => {
-    setSelectedOrder(order);
+    // Normalize order for modal
+    const normalized = {
+      id: order.id,
+      customer: order.customer,
+      type: order.type,
+      deliveryTime: order.deliveryTime,
+      items: Array.isArray(order.items) ? order.items.map(it => ({
+        id: it.itemId ?? it.id ?? Math.random().toString(36).slice(2,8),
+        name: it.name ?? it.ItemName ?? `#${it.itemId ?? it.id}`,
+        price: it.price ?? it.Price ?? 0,
+        quantity: it.quantity ?? it.qty ?? 1,
+      })) : [],
+    };
+    setSelectedOrder(normalized);
   };
 
   const handleCloseModal = () => {
@@ -72,6 +85,88 @@ const DashboardPage = ({ onLogout, navigateTo, currentPage }) => {
     }));
     handleCloseModal();
   };
+
+  useEffect(() => {
+    const fetchPaidOrders = async () => {
+      try {
+        const base = import.meta.env.VITE_API_BASE_URL || '';
+        const url = `${base}/api/Canteen/order/paid?offset=0&limit=50`;
+        const token = localStorage.getItem('authToken');
+        const headers = token ? { Authorization: token } : {};
+
+        const res = await fetch(url, { method: 'GET', headers });
+        const text = await res.text();
+        let body = null;
+        try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+
+        const list = Array.isArray(body?.orders) ? body.orders : (Array.isArray(body?.data) ? body.data : (Array.isArray(body) ? body : []));
+
+        // collect unique userIds to fetch names in bulk
+        const userIdSet = new Set();
+        list.forEach(o => {
+          const uid = o.userId ?? o.user_id ?? (o.user && (o.user.id || o.userId));
+          if (uid !== undefined && uid !== null) userIdSet.add(uid);
+        });
+
+        const userMap = new Map();
+        if (userIdSet.size) {
+          await Promise.all(Array.from(userIdSet).map(async (uid) => {
+            try {
+              const uurl = `${base}/api/Canteen/user/get-user-details?userId=${encodeURIComponent(uid)}`;
+              const r = await fetch(uurl, { headers });
+              const t = await r.text();
+              let b = null;
+              try { b = t ? JSON.parse(t) : null; } catch { b = t; }
+              let name = null;
+              if (b) {
+                if (b.name) name = b.name;
+                else if (b.username) name = b.username;
+                else if (b.data && (b.data.name || b.data.username)) name = b.data.name || b.data.username;
+                else if (b.data && b.data.user && (b.data.user.name || b.data.user.username)) name = b.data.user.name || b.data.user.username;
+              }
+              userMap.set(uid, name || `#${uid}`);
+            } catch (err) {
+              userMap.set(uid, `#${uid}`);
+            }
+          }));
+        }
+
+        // Map and filter actionable orders (payment charged and not delivered/cancelled)
+        const actionable = (list || []).map(o => {
+          const orderId = o.orderId ?? o.id ?? o.order_id ?? (o.transactionId ? `ORD-${o.transactionId}` : null);
+          const uid = o.userId ?? o.user_id ?? (o.user && (o.user.id || o.userId));
+          const customerFromPayload = (o.user && (o.user.name || o.user.username)) || o.customerName || o.userName || o.customer || 'Guest';
+          const customer = (uid && userMap.has(uid)) ? userMap.get(uid) : customerFromPayload;
+          const statusRaw = String(o.status ?? o.orderStatus ?? o.statusText ?? '').toLowerCase();
+          const paymentStatus = String(o.paymentStatus ?? o.payment_status ?? '').toLowerCase();
+
+          const isCharged = /charg|paid|success|settled/.test(paymentStatus);
+          const isDeliveredLike = /deliv|deliver|delivered|completed|cancel|refun|refunded/.test(statusRaw);
+          const actionableFlag = isCharged && !isDeliveredLike;
+
+          const displayStatus = actionableFlag ? 'Preparing' : statusRaw || '';
+          const type = /parcel|pickup|takeaway|takeway/i.test(o.orderType || o.type || '') ? 'Parcel' : 'Dine-in';
+          const deliveryTime = o.deliveryTime ?? o.expectedDeliveryTime ?? o.orderTime ?? o.updatedAt ?? null;
+          return {
+            id: orderId || `#${o.id || Math.random().toString(36).slice(2,8)}`,
+            customer,
+            status: displayStatus,
+            type,
+            deliveryTime,
+            _actionable: actionableFlag,
+          };
+        }).filter(o => o._actionable);
+
+        setDashboardData(prev => ({ ...prev, liveOrders: actionable }));
+      } catch (err) {
+        console.error('fetchPaidOrders error', err);
+      }
+    };
+
+    fetchPaidOrders();
+    const interval = setInterval(fetchPaidOrders, 15000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <Layout 
