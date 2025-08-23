@@ -58,6 +58,7 @@ const DashboardPage = ({ onLogout, navigateTo, currentPage }) => {
     // Normalize order for modal
     const normalized = {
       id: order.id,
+  transactionId: order.transactionId ?? order.transaction_id ?? order.transaction ?? order.txnId ?? null,
       customer: order.customer,
       type: order.type,
       deliveryTime: order.deliveryTime,
@@ -76,14 +77,79 @@ const DashboardPage = ({ onLogout, navigateTo, currentPage }) => {
   };
 
   // --- Handlers for Modal Actions ---
-  const handleUpdateOrderStatus = (orderId, newStatus) => {
-    setDashboardData(prevData => ({
-      ...prevData,
-      liveOrders: prevData.liveOrders.map(order => 
-        order.id === orderId ? { ...order, status: newStatus } : order
-      )
-    }));
-    handleCloseModal();
+  const handleUpdateOrderStatus = async (identifier, newStatus) => {
+    // When marking completed, call backend to set paymentStatus to DELIVERED
+    try {
+      if (newStatus === 'Completed' || newStatus === 'Cancelled') {
+        const base = import.meta.env.VITE_API_BASE_URL || '';
+        const url = `${base}/api/Canteen/order/${encodeURIComponent(identifier)}/status`;
+        const token = localStorage.getItem('authToken');
+        const headers = { 'Content-Type': 'application/json', ...(token ? { Authorization: token } : {}) };
+
+        const bodyPaymentStatus = newStatus === 'Completed' ? 'DELIVERED' : 'REFUNDED';
+
+        const resp = await fetch(url, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ paymentStatus: bodyPaymentStatus }),
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          console.error('Failed to update order status', resp.status, text);
+          handleCloseModal();
+          return;
+        }
+
+        // try to parse JSON response and use its values to update local state
+        let respBody = null;
+        try { respBody = await resp.json(); } catch (e) { respBody = null; }
+        const returnedPaymentStatus = respBody?.paymentStatus ?? respBody?.payment_status ?? bodyPaymentStatus;
+        const returnedTransactionId = respBody?.transactionId ?? respBody?.transaction_id ?? null;
+        const returnedOrderId = respBody?.orderId ?? respBody?.order_id ?? null;
+
+        // Update local state using returnedPaymentStatus and attach transactionId if available
+        setDashboardData(prevData => ({
+          ...prevData,
+          liveOrders: prevData.liveOrders.map(order => {
+            // match by transactionId first
+            if (order.transactionId && (order.transactionId === identifier || order.transactionId === returnedTransactionId)) {
+              return { ...order, status: newStatus, paymentStatus: returnedPaymentStatus, transactionId: returnedTransactionId || order.transactionId };
+            }
+            // then match by order display id
+            if (order.id === identifier || order.id === `ORD-${identifier}`) {
+              return { ...order, status: newStatus, paymentStatus: returnedPaymentStatus, transactionId: returnedTransactionId || order.transactionId };
+            }
+            // also consider numeric orderId mapping
+            if (returnedOrderId && String(order.orderId || order.id) === String(returnedOrderId)) {
+              return { ...order, status: newStatus, paymentStatus: returnedPaymentStatus };
+            }
+            return order;
+          })
+        }));
+
+        handleCloseModal();
+        return;
+      }
+
+      // update local UI state for non-patched statuses -- match by identifier
+      setDashboardData(prevData => ({
+        ...prevData,
+        liveOrders: prevData.liveOrders.map(order => {
+          if (order.transactionId && order.transactionId === identifier) {
+            return { ...order, status: newStatus, paymentStatus: newStatus === 'Completed' ? 'DELIVERED' : (newStatus === 'Cancelled' ? 'REFUNDED' : order.paymentStatus) };
+          }
+          if (order.id === identifier || order.id === `ORD-${identifier}`) {
+            return { ...order, status: newStatus, paymentStatus: newStatus === 'Completed' ? 'DELIVERED' : (newStatus === 'Cancelled' ? 'REFUNDED' : order.paymentStatus) };
+          }
+          return order;
+        })
+      }));
+      handleCloseModal();
+    } catch (err) {
+      console.error('handleUpdateOrderStatus error', err);
+      handleCloseModal();
+    }
   };
 
   useEffect(() => {
@@ -167,6 +233,7 @@ const DashboardPage = ({ onLogout, navigateTo, currentPage }) => {
         // Map and filter actionable orders (payment charged and not delivered/cancelled)
         const actionable = (list || []).map(o => {
           const orderId = o.orderId ?? o.id ?? o.order_id ?? (o.transactionId ? `ORD-${o.transactionId}` : null);
+          const txn = o.transactionId ?? o.transaction_id ?? o.transaction ?? o.txnId ?? o.transactionId ?? null;
           const uid = o.userId ?? o.user_id ?? (o.user && (o.user.id || o.userId));
           const customerFromPayload = (o.user && (o.user.name || o.user.username)) || o.customerName || o.userName || o.customer || 'Guest';
           const customer = (uid && userMap.has(uid)) ? userMap.get(uid) : customerFromPayload;
@@ -196,6 +263,7 @@ const DashboardPage = ({ onLogout, navigateTo, currentPage }) => {
 
           return {
             id: orderId || `#${o.id || Math.random().toString(36).slice(2,8)}`,
+            transactionId: txn,
             customer,
             status: displayStatus,
             type,
@@ -240,8 +308,8 @@ const DashboardPage = ({ onLogout, navigateTo, currentPage }) => {
         <OrderDetailModal 
             order={selectedOrder}
             onClose={handleCloseModal}
-            onComplete={() => handleUpdateOrderStatus(selectedOrder.id, 'Completed')}
-            onCancel={() => handleUpdateOrderStatus(selectedOrder.id, 'Cancelled')}
+            onComplete={() => handleUpdateOrderStatus(selectedOrder.transactionId ?? selectedOrder.id, 'Completed')}
+            onCancel={() => handleUpdateOrderStatus(selectedOrder.transactionId ?? selectedOrder.id, 'Cancelled')}
         />
       )}
     </Layout>

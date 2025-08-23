@@ -63,13 +63,13 @@ const OrderDetailModal = ({ order, onClose, onComplete, onCancel }) => {
             onClick={() => onComplete(order.id)}
             className="flex-1 px-6 py-3 text-lg font-semibold text-white bg-green-600 rounded-lg shadow-md hover:bg-green-700"
           >
-            Mark as Completed
+            Complete Order
           </button>
           <button
             onClick={() => onCancel(order.id)}
             className="flex-1 px-6 py-3 text-lg font-semibold text-white bg-red-600 rounded-lg shadow-md hover:bg-red-700"
           >
-            Cancel Order
+            Refund Order
           </button>
         </div>
       </div>
