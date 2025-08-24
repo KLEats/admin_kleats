@@ -240,9 +240,37 @@ const DashboardPage = ({ onLogout, navigateTo, currentPage }) => {
       }
     };
 
+    const fetchTopSelling = async () => {
+      try {
+        const base = import.meta.env.VITE_API_BASE_URL || '';
+        const token = localStorage.getItem('authToken');
+        const headers = token ? { Authorization: token } : {};
+        const res = await fetch(`${base}/api/explore/get/popular-items`, { headers, method: 'GET' });
+        const text = await res.text();
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+        if (!res.ok || data?.code !== 1) return; // silently ignore if fail
+        const list = Array.isArray(data.data) ? data.data : [];
+        // Sort primarily by totalQuantity desc, then orderCount desc
+        const sorted = [...list].sort((a,b) => (b.totalQuantity || 0) - (a.totalQuantity || 0) || (b.orderCount || 0) - (a.orderCount || 0));
+        // Map to { name, count }
+        const mapped = sorted.map(entry => ({
+          name: entry.item?.ItemName || entry.item?.name || `#${entry.itemId}`,
+          count: entry.totalQuantity ?? 0, // displayed as "sold"
+          orderCount: entry.orderCount ?? 0,
+          itemId: entry.itemId
+        })); // include zero-count items as well so list isn't empty
+        setDashboardData(prev => ({ ...prev, topSellingItems: mapped.slice(0, 10) }));
+      } catch (err) {
+        console.error('fetchTopSelling error', err);
+      }
+    };
+
     fetchPaidOrders();
+    fetchTopSelling();
     const interval = setInterval(fetchPaidOrders, 15000);
-    return () => clearInterval(interval);
+    const popularInterval = setInterval(fetchTopSelling, 60000); // refresh popular items every minute
+  return () => { clearInterval(interval); clearInterval(popularInterval); };
   }, []);
 
   return (
