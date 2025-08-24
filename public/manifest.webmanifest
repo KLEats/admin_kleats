@@ -1,0 +1,14 @@
+{
+  "name": "KLEats Admin",
+  "short_name": "KLEats",
+  "description": "Administration dashboard for KLEats canteen operations.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1d4ed8",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/KL-eats.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
