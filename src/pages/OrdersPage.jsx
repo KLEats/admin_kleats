@@ -244,142 +244,155 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
 
   useEffect(() => {
     let mounted = true;
+    const STATUS_ENDPOINTS = {
+      charged: '/api/Canteen/order/paid',
+      delivered: '/api/Canteen/order/delivered'
+    };
+
+    const fetchOrdersForStatus = async (statusKey) => {
+      const base = import.meta.env.VITE_API_BASE_URL || '';
+      const token = getToken();
+      const headers = token ? { Authorization: token } : {};
+      if (!STATUS_ENDPOINTS[statusKey]) return [];
+      const url = `${base}${STATUS_ENDPOINTS[statusKey]}?offset=0&limit=50`;
+      const res = await fetch(url, { headers });
+      const text = await res.text();
+      let body = null;
+      try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+      if (!res.ok) throw new Error(`${statusKey} fetch failed: ${res.status}`);
+      // tolerant extraction
+      let list = [];
+      if (Array.isArray(body)) list = body;
+      else if (Array.isArray(body?.orders)) list = body.orders;
+      else if (Array.isArray(body?.data)) list = body.data;
+      else if (Array.isArray(body?.result)) list = body.result;
+      else if (Array.isArray(body?.data?.orders)) list = body.data.orders;
+      else {
+        const arr = Object.values(body || {}).find(v => Array.isArray(v));
+        if (arr) list = arr;
+      }
+      return list.map(normalizeOrder);
+    };
+
+    const fetchAllOrdersList = async () => {
+      const base = import.meta.env.VITE_API_BASE_URL || '';
+      const token = getToken();
+      const headers = token ? { Authorization: token } : {};
+      const url = `${base}/api/Canteen/order/list?offset=0&limit=50`;
+      const res = await fetch(url, { headers });
+      const text = await res.text();
+      let body = null; try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+      if (!res.ok) throw new Error(`list fetch failed: ${res.status}`);
+      let list = [];
+      if (Array.isArray(body)) list = body;
+      else if (Array.isArray(body?.orders)) list = body.orders;
+      else if (Array.isArray(body?.data)) list = body.data;
+      else if (Array.isArray(body?.result)) list = body.result;
+      else if (Array.isArray(body?.data?.orders)) list = body.data.orders;
+      else {
+        const arr = Object.values(body || {}).find(v => Array.isArray(v));
+        if (arr) list = arr;
+      }
+      return list.map(normalizeOrder);
+    };
+
     (async () => {
       setLoading(true);
       setError(null);
       try {
-        const base = import.meta.env.VITE_API_BASE_URL || '';
-        const url = `${base}/api/Canteen/order/list?offset=0&limit=50`;
-  const token = getToken();
-  const headers = token ? { Authorization: token } : {};
-        const res = await fetch(url, { method: 'GET', headers });
-        const text = await res.text();
-        let body = null;
-        try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-        if (!res.ok) throw new Error(`Fetch orders failed: ${res.status} ${res.statusText}`);
-
-        // tolerant extraction of list
-        let list = [];
-        if (Array.isArray(body)) list = body;
-        else if (Array.isArray(body?.orders)) list = body.orders;
-        else if (Array.isArray(body?.data)) list = body.data;
-        else if (Array.isArray(body?.result)) list = body.result;
-        else if (Array.isArray(body?.data?.orders)) list = body.data.orders;
-        else {
-          const arr = Object.values(body || {}).find(v => Array.isArray(v));
-          if (arr) list = arr;
+        const statusSel = String(filters.status || 'All').toLowerCase();
+        let normalizedAll = [];
+        if (statusSel === 'all') {
+          // fetch unified list endpoint to include all (including refunded)
+          normalizedAll = await fetchAllOrdersList();
+        } else if (['charged','delivered'].includes(statusSel)) {
+          normalizedAll = await fetchOrdersForStatus(statusSel);
+        } else if (statusSel === 'refunded') {
+          // fetch unified list then filter refunded later by existing filtering logic
+          normalizedAll = await fetchAllOrdersList();
+        } else {
+          normalizedAll = []; // unknown status
         }
 
-        const normalized = list.map(normalizeOrder);
-
-  // Enrich items with item names by fetching item details for unique item ids
+        // Enrich item names (reuse prior logic)
         const idSet = new Set();
-        normalized.forEach(o => {
-          if (Array.isArray(o.items)) {
-            o.items.forEach(it => {
-              const iid = it.ItemId ?? it.itemId ?? it.id ?? it.ItemID ?? null;
-              if (iid !== null && typeof iid !== 'undefined') idSet.add(iid);
-            });
-          }
-        });
-
+        normalizedAll.forEach(o => Array.isArray(o.items) && o.items.forEach(it => {
+          const iid = it.ItemId ?? it.itemId ?? it.id ?? it.ItemID ?? null;
+          if (iid !== null && typeof iid !== 'undefined') idSet.add(iid);
+        }));
         const idArray = Array.from(idSet);
         const nameCache = new Map();
         const fetchItemName = async (itemId) => {
           if (nameCache.has(itemId)) return nameCache.get(itemId);
           try {
-            const base = import.meta.env.VITE_API_BASE_URL || '';
-            const token = getToken();
-            const headers = token ? { Authorization: token } : {};
-            const url = `${base}/api/explore/item?item_id=${encodeURIComponent(itemId)}`;
-            const res = await fetch(url, { headers });
-            const text = await res.text();
-            let body = null;
-            try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-            // heuristics to extract item name
+            const baseInner = import.meta.env.VITE_API_BASE_URL || '';
+            const tokenInner = getToken();
+            const headersInner = tokenInner ? { Authorization: tokenInner } : {};
+            const urlInner = `${baseInner}/api/explore/item?item_id=${encodeURIComponent(itemId)}`;
+            const r = await fetch(urlInner, { headers: headersInner });
+            const t = await r.text();
+            let b = null; try { b = t ? JSON.parse(t) : null; } catch { b = t; }
             let name = null;
-            if (body) {
-              if (body.ItemName) name = body.ItemName;
-              else if (body.name) name = body.name;
-              else if (body.data && body.data.ItemName) name = body.data.ItemName;
-              else if (body.data && body.data.name) name = body.data.name;
-              else if (Array.isArray(body) && body[0]) name = body[0].ItemName || body[0].name;
-              else if (body.data && Array.isArray(body.data) && body.data[0]) name = body.data[0].ItemName || body.data[0].name;
+            if (b) {
+              if (b.ItemName) name = b.ItemName; else if (b.name) name = b.name;
+              else if (b.data && b.data.ItemName) name = b.data.ItemName; else if (b.data && b.data.name) name = b.data.name;
+              else if (Array.isArray(b) && b[0]) name = b[0].ItemName || b[0].name;
+              else if (b.data && Array.isArray(b.data) && b.data[0]) name = b.data[0].ItemName || b.data[0].name;
             }
             nameCache.set(itemId, name || null);
             return name || null;
-          } catch (err) {
-            console.warn('Failed to fetch item name for', itemId, err);
-            nameCache.set(itemId, null);
-            return null;
-          }
+          } catch { nameCache.set(itemId, null); return null; }
         };
+        if (idArray.length) await Promise.all(idArray.map(id => fetchItemName(id)));
+        const enriched = normalizedAll.map(o => ({
+          ...o,
+          items: Array.isArray(o.items) ? o.items.map(it => {
+            const iid = it.ItemId ?? it.itemId ?? it.id ?? it.ItemID ?? null;
+            const name = iid != null ? nameCache.get(iid) : null;
+            return { ...it, name: name || it.ItemName || it.name || null };
+          }) : []
+        }));
 
-        // Fetch names in parallel (but reasonably sized)
-        if (idArray.length) {
-          await Promise.all(idArray.map(id => fetchItemName(id)));
-          // map names into orders
-          const enriched = normalized.map(o => ({
-            ...o,
-            items: Array.isArray(o.items) ? o.items.map(it => {
-              const iid = it.ItemId ?? it.itemId ?? it.id ?? it.ItemID ?? null;
-              const name = iid != null ? nameCache.get(iid) : null;
-              return { ...it, name: name || it.ItemName || it.name || null };
-            }) : []
-          }));
-          // Before setting orders, bulk-prefetch usernames for the orders to avoid many per-row calls
-          const userIdSet = new Set();
-          enriched.forEach(o => { if (o.userId) userIdSet.add(o.userId); });
-          const userIdsToFetch = Array.from(userIdSet).filter(uid => !sharedUsernameCache.has(uid));
-          if (userIdsToFetch.length) {
-            // fetch all user details in parallel (small batch)
-            await Promise.all(userIdsToFetch.map(async (uid) => {
-              try {
-                const base = import.meta.env.VITE_API_BASE_URL || '';
-                const token = getToken();
-                const headers = token ? { Authorization: token } : {};
-                const url = `${base}/api/Canteen/user/get-user-details?userId=${encodeURIComponent(uid)}`;
-                const res = await fetch(url, { headers });
-                const text = await res.text();
-                let body = null;
-                try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-                let details = null;
-                if (body) {
-                  // prefer body.data if present
-                  const src = body.data || body;
-                  details = {
-                    name: src.name || src.username || `#${uid}`,
-                    email: src.email || null,
-                    phoneNo: src.phoneNo || src.phone || null,
-                    role: src.role || null,
-                    DayOrHos: src.DayOrHos || null
-                  };
-                }
-                if (!details) details = { name: `#${uid}` };
-                sharedUsernameCache.set(uid, details);
-              } catch (err) {
-                console.warn('bulk fetch username failed for', uid, err);
-                sharedUsernameCache.set(uid, `#${uid}`);
+        // Bulk user detail fetch
+        const userIdSet = new Set();
+        enriched.forEach(o => { if (o.userId) userIdSet.add(o.userId); });
+        const userIdsToFetch = Array.from(userIdSet).filter(uid => !sharedUsernameCache.has(uid));
+        if (userIdsToFetch.length) {
+          await Promise.all(userIdsToFetch.map(async (uid) => {
+            try {
+              const baseU = import.meta.env.VITE_API_BASE_URL || '';
+              const tokenU = getToken();
+              const headersU = tokenU ? { Authorization: tokenU } : {};
+              const uurl = `${baseU}/api/Canteen/user/get-user-details?userId=${encodeURIComponent(uid)}`;
+              const r = await fetch(uurl, { headers: headersU });
+              const t = await r.text();
+              let b = null; try { b = t ? JSON.parse(t) : null; } catch { b = t; }
+              let details = null;
+              if (b) {
+                const src = b.data || b;
+                details = {
+                  name: src.name || src.username || `#${uid}`,
+                  email: src.email || null,
+                  phoneNo: src.phoneNo || src.phone || null,
+                  role: src.role || null,
+                  DayOrHos: src.DayOrHos || null
+                };
               }
-            }));
-          }
+              if (!details) details = { name: `#${uid}` };
+              sharedUsernameCache.set(uid, details);
+            } catch { sharedUsernameCache.set(uid, `#${uid}`); }
+          }));
+        }
 
-          if (mounted) setOrders(enriched);
-        } else {
-          if (mounted) setOrders(normalized);
-        }
+        if (mounted) setOrders(enriched);
       } catch (err) {
-        console.error('orders fetch error', err);
-        if (mounted) {
-          setError(String(err.message || err));
-          setOrders([]);
-        }
+        if (mounted) { setError(String(err.message || err)); setOrders([]); }
       } finally {
         if (mounted) setLoading(false);
       }
     })();
     return () => { mounted = false; };
-  }, []);
+  }, [filters.status]);
 
   // --- THE CORRECTED FILTERING LOGIC IS HERE ---
   const filteredOrders = useMemo(() => {

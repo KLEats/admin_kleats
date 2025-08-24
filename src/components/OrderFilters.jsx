@@ -23,7 +23,6 @@ const OrderFilters = ({ filters, onFilterChange }) => {
           <option value="All">All</option>
           <option value="charged">Charged</option>
           <option value="delivered">Delivered</option>
-          <option value="pending">Pending</option>
           <option value="refunded">Refunded</option>
         </select>
       </div>
