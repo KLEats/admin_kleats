@@ -49,7 +49,7 @@ export function buildImageUrl(path) {
 export async function fetchItemsByCategory(category) {
   const base = getBase();
   const token = getToken();
-  const url = base + '/api/explore/get/items-by-category/' + encodeURIComponent(category);
+  const url = base + '/api/explore/canteen/1/items-by-category/all/' + encodeURIComponent(category);
   const res = await fetch(url, {
     headers: token ? { Authorization: token } : {}
   });
