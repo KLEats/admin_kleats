@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { loginRequest, storeToken, clearToken, getToken } from './api/auth.js';
+import { loginRequest, storeToken, clearToken, getToken, isTokenExpired } from './api/auth.js';
 
 // Page Imports
 import LoginPage from './pages/LoginPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import MenuPage from './pages/MenuPage.jsx';
 import OrdersPage from './pages/OrdersPage.jsx';
-// ReportsPage removed; export functionality moved to OrdersPage
+import ReportsPage from './pages/ReportsPage.jsx'; // Import the new ReportsPage
 
 // --- Main App Component ---
 export default function App() {
@@ -48,12 +48,42 @@ export default function App() {
       case 'orders':
         return <OrdersPage onLogout={handleLogout} navigateTo={navigateTo} currentPage={currentPage} />;
       case 'reports':
-        // Show orders page for reports navigation (export available from Orders)
-        return <OrdersPage onLogout={handleLogout} navigateTo={navigateTo} currentPage={currentPage} />;
+        return <ReportsPage onLogout={handleLogout} navigateTo={navigateTo} currentPage={currentPage} />;
       default:
         return <DashboardPage onLogout={handleLogout} navigateTo={navigateTo} currentPage={currentPage} />;
     }
   };
+
+  // Periodically check token validity and redirect to login if expired or removed.
+  useEffect(() => {
+    const checkToken = () => {
+      try {
+        const t = getToken();
+        if (!t) {
+          // no token -> ensure logged out
+          handleLogout();
+          return;
+        }
+        const expired = isTokenExpired(t);
+        if (expired === true) {
+          handleLogout();
+        }
+      } catch (e) {
+        // swallow errors; conservative approach: logout
+        handleLogout();
+      }
+    };
+
+    checkToken();
+    const id = setInterval(checkToken, 5000); // check every 5s
+
+    const onStorage = (e) => {
+      if (e.key === 'authToken' && !e.newValue) handleLogout();
+    };
+    window.addEventListener('storage', onStorage);
+
+    return () => { clearInterval(id); window.removeEventListener('storage', onStorage); };
+  }, []);
 
   return (
     <>
