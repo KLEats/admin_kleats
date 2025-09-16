@@ -321,16 +321,18 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
       setLoading(true);
       setError(null);
       try {
-        const statusSel = String(filters.status || 'All').toLowerCase();
+  // allow filters.status to be string or array (from checkbox list)
+  const statusRaw = filters.status ?? 'All';
+  const statusSel = Array.isArray(statusRaw) ? statusRaw.map(s => String(s).toLowerCase()) : [String(statusRaw).toLowerCase()];
         let normalizedAll = [];
-        if (statusSel === 'all') {
+        if (statusSel.length === 1 && statusSel[0] === 'all') {
           // fetch all orders with date filtering (paged)
           const start = filters.startDate ? `${filters.startDate} 00:00` : '';
           const end = filters.endDate ? `${filters.endDate} 23:59` : '';
           const resp = await fetchAllOrdersList(start, end, page * pageSize, pageSize);
           normalizedAll = resp.orders;
           if (resp.meta && resp.meta.totalCount != null) setTotalCount(resp.meta.totalCount);
-        } else if (statusSel) {
+        } else if (statusSel && !(statusSel.length === 1 && statusSel[0] === 'all')) {
           // For specific status filters (e.g. 'delivered' or 'charged'),
           // fetch a larger set from the list endpoint and apply strict client-side
           // filtering so the first page contains matching items. This avoids
@@ -342,12 +344,13 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
           const resp = await fetchAllOrdersList(start, end, 0, largeLimit);
           let allFetched = resp.orders || [];
           // canonicalize selected filter
-          const selectedCanon = canonicalizeStatus(statusSel) || statusSel;
-          // keep orders where either paymentStatus or order status matches selected
+          // canonicalize selected filters into a set
+          const selectedCanonSet = new Set(statusSel.map(s => canonicalizeStatus(s) || s));
+          // keep orders where either paymentStatus or order status matches any selected
           const matching = allFetched.filter(o => {
             const payCanon = canonicalizeStatus(o.paymentStatus ?? o.raw?.paymentStatus ?? o.raw?.payment_status ?? o.raw?.payment ?? '');
             const statCanon = canonicalizeStatus(o.status ?? o.raw?.status ?? '');
-            return (payCanon === selectedCanon) || (statCanon === selectedCanon);
+            return selectedCanonSet.has(payCanon) || selectedCanonSet.has(statCanon);
           });
           // set totalCount to number of matching orders
           setTotalCount(matching.length);
@@ -455,24 +458,30 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
 
   // --- THE CORRECTED FILTERING LOGIC IS HERE ---
   const filteredOrders = useMemo(() => {
-    // Use canonicalized statuses so UI "Delivered" matches whatever shape backend uses.
-    const rawStatusFilter = String(filters.status || 'All').toLowerCase();
-    const statusFilterCanon = rawStatusFilter === 'all' ? null : (canonicalizeStatus(rawStatusFilter) || rawStatusFilter);
-    const priority = ['charged', 'delivered', 'pending', 'refunded'];
+    // Support filters.status being either a string ('All'|'delivered'|...) or an array of strings
+    const statusRaw = filters.status ?? 'All';
+    let selectedSet = null; // null means 'All'
+    if (Array.isArray(statusRaw)) {
+      const arr = statusRaw.length ? statusRaw : ['All'];
+      if (arr.length === 1 && String(arr[0]).toLowerCase() === 'all') selectedSet = null;
+      else selectedSet = new Set(arr.map(s => (canonicalizeStatus(s) || String(s).toLowerCase())));
+    } else {
+      const s = String(statusRaw).toLowerCase();
+      if (s === 'all') selectedSet = null;
+      else selectedSet = new Set([canonicalizeStatus(s) || s]);
+    }
 
     const typeFilter = String(filters.type || 'All').toLowerCase();
 
     const filtered = orders.filter(order => {
       const paymentRaw = order.paymentStatus ?? order.raw?.paymentStatus ?? order.raw?.payment_status ?? order.raw?.payment ?? '';
-      const statusRaw = order.status ?? order.raw?.status ?? '';
+      const statusRawOrder = order.status ?? order.raw?.status ?? '';
       const paymentCanon = canonicalizeStatus(paymentRaw) || '';
-      const statusCanon = canonicalizeStatus(statusRaw) || '';
+      const statusCanon = canonicalizeStatus(statusRawOrder) || '';
 
-      // If a status is selected, require either PAYMENT STATUS or ORDER STATUS (canonicalized) to match.
-      // This ensures selecting e.g. 'delivered' will show orders where paymentStatus is 'delivered'
-      // or where the order's status field canonicalizes to 'delivered'.
-      if (statusFilterCanon !== null) {
-        if (paymentCanon !== statusFilterCanon && statusCanon !== statusFilterCanon) return false;
+      // If a set of statuses is selected, require either PAYMENT STATUS or ORDER STATUS (canonicalized) to be in the set.
+      if (selectedSet !== null) {
+        if (!selectedSet.has(paymentCanon) && !selectedSet.has(statusCanon)) return false;
       }
 
       const orderType = String(order.orderType || order.raw?.orderType || order.raw?.type || '').toLowerCase();
@@ -482,11 +491,7 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
     });
 
     // Sort by ascending date and time
-    filtered.sort((a, b) => {
-      const dateA = new Date(a.date).getTime();
-      const dateB = new Date(b.date).getTime();
-      return dateA - dateB;
-    });
+    filtered.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     // Date filtering still applies
     return filtered.filter(order => {

@@ -44,7 +44,7 @@ const UserIdCell = ({ userId }) => {
   const details = (body && body.data) ? { name: (body.data.name || found), email: body.data.email || body.email || null, phoneNo: body.data.phoneNo || body.phoneNo || body.data.phone || null, role: body.data.role || body.role || null, DayOrHos: body.data.DayOrHos || body.DayOrHos || null } : { name: finalName, email: body?.email || null, phoneNo: body?.phoneNo || null, role: body?.role || null, DayOrHos: body?.DayOrHos || null };
   usernameCache.set(userId, details);
   setName(details.name || finalName);
-      return final;
+    return details;
     } catch (err) {
       console.warn('failed to fetch username', err);
   const fallback = `#${userId}`;
