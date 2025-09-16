@@ -6,7 +6,7 @@ import LoginPage from './pages/LoginPage.jsx';
 import DashboardPage from './pages/DashboardPage.jsx';
 import MenuPage from './pages/MenuPage.jsx';
 import OrdersPage from './pages/OrdersPage.jsx';
-import ReportsPage from './pages/ReportsPage.jsx'; // Import the new ReportsPage
+
 
 // --- Main App Component ---
 export default function App() {

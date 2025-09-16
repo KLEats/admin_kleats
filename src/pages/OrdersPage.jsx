@@ -137,6 +137,10 @@ const dummyMetrics = {
 
 const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
   const [orders, setOrders] = useState(initialOrderHistory);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
+  const [totalCount, setTotalCount] = useState(null);
+  const [fetchKey, setFetchKey] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -152,6 +156,8 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
       ...prevFilters,
       [name]: value,
     }));
+    // reset to first page when filters change
+    setPage(0);
   };
 
   const parseItemsField = (itemsField) => {
@@ -249,12 +255,18 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
       delivered: '/api/Canteen/order/delivered'
     };
 
-    const fetchOrdersForStatus = async (statusKey) => {
+    const fetchOrdersForStatus = async (statusKey, startDate, endDate, offset = 0, limit = 50) => {
       const base = import.meta.env.VITE_API_BASE_URL || '';
       const token = getToken();
       const headers = token ? { Authorization: token } : {};
       if (!STATUS_ENDPOINTS[statusKey]) return [];
-      const url = `${base}${STATUS_ENDPOINTS[statusKey]}?offset=0&limit=50`;
+      let url = '';
+      if (statusKey === 'charged') {
+        // charged endpoint supports start/end query params in some backends
+        url = `${base}${STATUS_ENDPOINTS[statusKey]}?start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}&offset=${offset}&limit=${limit}`;
+      } else {
+        url = `${base}${STATUS_ENDPOINTS[statusKey]}?offset=${offset}&limit=${limit}`;
+      }
       const res = await fetch(url, { headers });
       const text = await res.text();
       let body = null;
@@ -262,6 +274,7 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
       if (!res.ok) throw new Error(`${statusKey} fetch failed: ${res.status}`);
       // tolerant extraction
       let list = [];
+      let meta = null;
       if (Array.isArray(body)) list = body;
       else if (Array.isArray(body?.orders)) list = body.orders;
       else if (Array.isArray(body?.data)) list = body.data;
@@ -271,19 +284,26 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
         const arr = Object.values(body || {}).find(v => Array.isArray(v));
         if (arr) list = arr;
       }
-      return list.map(normalizeOrder);
+      // try to extract meta/totalCount if present
+      meta = body?.meta || body?.pagination || body?.paging || null;
+      const count = meta?.totalCount ?? meta?.total ?? body?.totalCount ?? body?.meta?.totalCount ?? null;
+      return { orders: list.map(normalizeOrder), meta: { totalCount: count } };
     };
 
-    const fetchAllOrdersList = async () => {
+    const fetchAllOrdersList = async (startDate, endDate, offset = 0, limit = 20) => {
       const base = import.meta.env.VITE_API_BASE_URL || '';
       const token = getToken();
       const headers = token ? { Authorization: token } : {};
-      const url = `${base}/api/Canteen/order/list?offset=0&limit=50`;
+      // Format start and end as 'YYYY-MM-DD HH:mm' (URL encoded)
+      const start = encodeURIComponent(startDate);
+      const end = encodeURIComponent(endDate);
+      const url = `${base}/api/Canteen/order/list?offset=${offset}&limit=${limit}&start=${start}&end=${end}`;
       const res = await fetch(url, { headers });
       const text = await res.text();
       let body = null; try { body = text ? JSON.parse(text) : null; } catch { body = text; }
       if (!res.ok) throw new Error(`list fetch failed: ${res.status}`);
       let list = [];
+      let meta = null;
       if (Array.isArray(body)) list = body;
       else if (Array.isArray(body?.orders)) list = body.orders;
       else if (Array.isArray(body?.data)) list = body.data;
@@ -293,23 +313,33 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
         const arr = Object.values(body || {}).find(v => Array.isArray(v));
         if (arr) list = arr;
       }
-      return list.map(normalizeOrder);
+      meta = body?.meta || body?.pagination || body?.paging || null;
+      const count = meta?.totalCount ?? meta?.total ?? body?.totalCount ?? body?.meta?.totalCount ?? null;
+      return { orders: list.map(normalizeOrder), meta: { totalCount: count } };
     };
 
-    (async () => {
+  (async () => {
       setLoading(true);
       setError(null);
       try {
         const statusSel = String(filters.status || 'All').toLowerCase();
         let normalizedAll = [];
         if (statusSel === 'all') {
-          // fetch unified list endpoint to include all (including refunded)
-          normalizedAll = await fetchAllOrdersList();
+          // fetch all orders with date filtering
+          const start = filters.startDate ? `${filters.startDate} 00:00` : '';
+          const end = filters.endDate ? `${filters.endDate} 23:59` : '';
+          const resp = await fetchAllOrdersList(start, end, page * pageSize, pageSize);
+          normalizedAll = resp.orders;
+          if (resp.meta && resp.meta.totalCount != null) setTotalCount(resp.meta.totalCount);
         } else if (['charged','delivered'].includes(statusSel)) {
-          normalizedAll = await fetchOrdersForStatus(statusSel);
+          const resp = await fetchOrdersForStatus(statusSel, filters.startDate ? `${filters.startDate} 00:00` : '', filters.endDate ? `${filters.endDate} 23:59` : '', page * pageSize, pageSize);
+          normalizedAll = resp.orders;
+          if (resp.meta && resp.meta.totalCount != null) setTotalCount(resp.meta.totalCount);
         } else if (statusSel === 'refunded') {
           // fetch unified list then filter refunded later by existing filtering logic
-          normalizedAll = await fetchAllOrdersList();
+          const resp = await fetchAllOrdersList('', '', page * pageSize, pageSize);
+          normalizedAll = resp.orders;
+          if (resp.meta && resp.meta.totalCount != null) setTotalCount(resp.meta.totalCount);
         } else {
           normalizedAll = []; // unknown status
         }
@@ -384,15 +414,35 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
           }));
         }
 
-        if (mounted) setOrders(enriched);
+        if (mounted) {
+          setOrders(enriched);
+          // If backend did not provide totalCount, try to infer: if returned less than pageSize,
+          // we can estimate total as currentOffset + returnedCount.
+          if (totalCount === null || typeof totalCount === 'undefined') {
+            if (enriched.length < pageSize) {
+              setTotalCount(page * pageSize + enriched.length);
+            }
+          }
+          // If page returned empty and we're beyond page 0, go back one page and re-fetch
+          if (enriched.length === 0 && page > 0) {
+            setPage(p => Math.max(0, p - 1));
+          }
+        }
       } catch (err) {
-        if (mounted) { setError(String(err.message || err)); setOrders([]); }
+        if (mounted) { setError(String(err.message || err)); setOrders([]); setTotalCount(null); }
       } finally {
         if (mounted) setLoading(false);
       }
     })();
     return () => { mounted = false; };
-  }, [filters.status]);
+  // include inputs that should re-trigger the fetch
+  }, [filters.status, filters.startDate, filters.endDate, filters.type, page, pageSize, fetchKey]);
+
+  // Manual GET trigger - fetch when user wants explicit refresh
+  const handleGetClick = async () => {
+    // trigger the same effect the useEffect does by toggling status briefly
+    setFetchKey(k => k + 1);
+  };
 
   // --- THE CORRECTED FILTERING LOGIC IS HERE ---
   const filteredOrders = useMemo(() => {
@@ -420,18 +470,11 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
       return true;
     });
 
-    // Sort using canonicalized statuses
+    // Sort by ascending date and time
     filtered.sort((a, b) => {
-      const aRaw = a.paymentStatus ?? a.raw?.paymentStatus ?? a.raw?.payment_status ?? a.status ?? a.raw?.status ?? '';
-      const bRaw = b.paymentStatus ?? b.raw?.paymentStatus ?? b.raw?.payment_status ?? b.status ?? b.raw?.status ?? '';
-      const aCanon = canonicalizeStatus(aRaw) || '';
-      const bCanon = canonicalizeStatus(bRaw) || '';
-      const ia = priority.indexOf(aCanon);
-      const ib = priority.indexOf(bCanon);
-      if (ia === -1 && ib === -1) return 0;
-      if (ia === -1) return 1;
-      if (ib === -1) return -1;
-      return ia - ib;
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return dateA - dateB;
     });
 
     // Date filtering still applies
@@ -459,8 +502,29 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
         </div>
 
         <OrderFilters filters={filters} onFilterChange={handleFilterChange} />
+        <div className="flex items-center justify-between my-3">
+          <div>
+            <button className="px-3 py-1 bg-blue-600 text-white rounded mr-2" onClick={handleGetClick}>GET</button>
+            <label className="mr-2">Page size:</label>
+            <select value={pageSize} onChange={(e) => { setPageSize(parseInt(e.target.value, 10)); setPage(0); }} className="border px-2 py-1">
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+            </select>
+          </div>
+          <div className="text-sm text-gray-600">
+            {typeof totalCount === 'number' ? `Showing page ${page + 1} of ${Math.max(1, Math.ceil(totalCount / pageSize))} — ${totalCount} orders` : `Page ${page + 1}`}
+          </div>
+        </div>
 
         <OrderHistoryTable orders={filteredOrders} />
+        <div className="flex items-center justify-between mt-4">
+          <div className="text-sm text-gray-600">{loading ? 'Loading...' : ''}</div>
+          <div className="space-x-2">
+            <button disabled={page <= 0 || loading} onClick={() => setPage(p => Math.max(0, p - 1))} className="px-3 py-1 bg-gray-100 border rounded disabled:opacity-50">Previous</button>
+            <button disabled={(typeof totalCount === 'number' && (page + 1) * pageSize >= totalCount) || loading} onClick={() => setPage(p => p + 1)} className="px-3 py-1 bg-gray-100 border rounded disabled:opacity-50">Next</button>
+          </div>
+        </div>
       </div>
     </Layout>
   );
