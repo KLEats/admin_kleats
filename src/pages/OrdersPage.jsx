@@ -140,7 +140,6 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(20);
   const [totalCount, setTotalCount] = useState(null);
-  const [fetchKey, setFetchKey] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -325,21 +324,35 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
         const statusSel = String(filters.status || 'All').toLowerCase();
         let normalizedAll = [];
         if (statusSel === 'all') {
-          // fetch all orders with date filtering
+          // fetch all orders with date filtering (paged)
           const start = filters.startDate ? `${filters.startDate} 00:00` : '';
           const end = filters.endDate ? `${filters.endDate} 23:59` : '';
           const resp = await fetchAllOrdersList(start, end, page * pageSize, pageSize);
           normalizedAll = resp.orders;
           if (resp.meta && resp.meta.totalCount != null) setTotalCount(resp.meta.totalCount);
-        } else if (['charged','delivered'].includes(statusSel)) {
-          const resp = await fetchOrdersForStatus(statusSel, filters.startDate ? `${filters.startDate} 00:00` : '', filters.endDate ? `${filters.endDate} 23:59` : '', page * pageSize, pageSize);
-          normalizedAll = resp.orders;
-          if (resp.meta && resp.meta.totalCount != null) setTotalCount(resp.meta.totalCount);
-        } else if (statusSel === 'refunded') {
-          // fetch unified list then filter refunded later by existing filtering logic
-          const resp = await fetchAllOrdersList('', '', page * pageSize, pageSize);
-          normalizedAll = resp.orders;
-          if (resp.meta && resp.meta.totalCount != null) setTotalCount(resp.meta.totalCount);
+        } else if (statusSel) {
+          // For specific status filters (e.g. 'delivered' or 'charged'),
+          // fetch a larger set from the list endpoint and apply strict client-side
+          // filtering so the first page contains matching items. This avoids
+          // relying on the backend page order which may mix statuses.
+          const start = filters.startDate ? `${filters.startDate} 00:00` : '';
+          const end = filters.endDate ? `${filters.endDate} 23:59` : '';
+          // fetch a reasonably large window (try to cover many matches)
+          const largeLimit = 1000;
+          const resp = await fetchAllOrdersList(start, end, 0, largeLimit);
+          let allFetched = resp.orders || [];
+          // canonicalize selected filter
+          const selectedCanon = canonicalizeStatus(statusSel) || statusSel;
+          // keep orders where either paymentStatus or order status matches selected
+          const matching = allFetched.filter(o => {
+            const payCanon = canonicalizeStatus(o.paymentStatus ?? o.raw?.paymentStatus ?? o.raw?.payment_status ?? o.raw?.payment ?? '');
+            const statCanon = canonicalizeStatus(o.status ?? o.raw?.status ?? '');
+            return (payCanon === selectedCanon) || (statCanon === selectedCanon);
+          });
+          // set totalCount to number of matching orders
+          setTotalCount(matching.length);
+          // take page slice after filtering
+          normalizedAll = matching.slice(page * pageSize, (page + 1) * pageSize);
         } else {
           normalizedAll = []; // unknown status
         }
@@ -436,13 +449,9 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
     })();
     return () => { mounted = false; };
   // include inputs that should re-trigger the fetch
-  }, [filters.status, filters.startDate, filters.endDate, filters.type, page, pageSize, fetchKey]);
+  }, [filters.status, filters.startDate, filters.endDate, filters.type, page, pageSize]);
 
-  // Manual GET trigger - fetch when user wants explicit refresh
-  const handleGetClick = async () => {
-    // trigger the same effect the useEffect does by toggling status briefly
-    setFetchKey(k => k + 1);
-  };
+  // Manual GET removed — fetching occurs automatically when filters/page/pageSize change
 
   // --- THE CORRECTED FILTERING LOGIC IS HERE ---
   const filteredOrders = useMemo(() => {
@@ -459,9 +468,11 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
       const paymentCanon = canonicalizeStatus(paymentRaw) || '';
       const statusCanon = canonicalizeStatus(statusRaw) || '';
 
-      // If a status is selected, require PAYMENT STATUS (canonicalized) to match.
+      // If a status is selected, require either PAYMENT STATUS or ORDER STATUS (canonicalized) to match.
+      // This ensures selecting e.g. 'delivered' will show orders where paymentStatus is 'delivered'
+      // or where the order's status field canonicalizes to 'delivered'.
       if (statusFilterCanon !== null) {
-        if (paymentCanon !== statusFilterCanon) return false;
+        if (paymentCanon !== statusFilterCanon && statusCanon !== statusFilterCanon) return false;
       }
 
       const orderType = String(order.orderType || order.raw?.orderType || order.raw?.type || '').toLowerCase();
@@ -504,7 +515,6 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
         <OrderFilters filters={filters} onFilterChange={handleFilterChange} />
         <div className="flex items-center justify-between my-3">
           <div>
-            <button className="px-3 py-1 bg-blue-600 text-white rounded mr-2" onClick={handleGetClick}>GET</button>
             <label className="mr-2">Page size:</label>
             <select value={pageSize} onChange={(e) => { setPageSize(parseInt(e.target.value, 10)); setPage(0); }} className="border px-2 py-1">
               <option value={10}>10</option>
