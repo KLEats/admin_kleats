@@ -125,6 +125,21 @@ const formatDateForInput = (date) => {
   return [year, month, day].join('-');
 };
 
+// Normalize user-entered filter date to YYYY-MM-DD. Handles YYYY-MM-DD and DD-MM-YYYY.
+const normalizeFilterDate = (d) => {
+  if (!d) return null;
+  const s = String(d).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  if (/^\d{2}[-\/]\d{2}[-\/]\d{4}$/.test(s)) {
+    const parts = s.includes('/') ? s.split('/') : s.split('-');
+    const [dd, mm, yyyy] = parts;
+    return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+  }
+  const dt = new Date(s);
+  if (!isNaN(dt.getTime())) return formatDateForInput(dt);
+  return null;
+};
+
 // --- DUMMY DATA ---
 // kept as a tiny fallback only
 const initialOrderHistory = [];
@@ -215,8 +230,9 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
     const transactionId = o.transactionId ?? o.txnId ?? o.transaction_id ?? null;
     const status = (o.status ?? 'pending');
     const canteenId = o.canteenId ?? o.canteen_id ?? o.canteen ?? null;
-    const orderTime = o.orderTime ?? o.order_time ?? o.createdAt ?? now.toISOString();
-    const deliveryTime = o.deliveryTime ?? o.delivery_time ?? o.updatedAt ?? null;
+    // try multiple possible fields for order time (camelCase and snake_case and variants)
+    const orderTime = o.orderTime ?? o.order_time ?? o.order_created ?? o.orderCreated ?? o.createdAt ?? o.created_at ?? o.created ?? o.placedAt ?? o.placed_at ?? o.placed ?? now.toISOString();
+    const deliveryTime = o.deliveryTime ?? o.delivery_time ?? o.updatedAt ?? o.updated_at ?? o.deliveredAt ?? o.delivered_at ?? null;
     const userId = o.userId ?? o.user_id ?? (o.user && (o.user.id || o.userId)) ?? null;
     const items = parseItemsField(o.items ?? o.orderItems ?? o.itemsJson);
     const orderType = o.orderType ?? o.type ?? 'dinein';
@@ -249,6 +265,22 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
 
   useEffect(() => {
     let mounted = true;
+    const normalizeFilterDate = (d) => {
+      if (!d) return null;
+      const s = String(d).trim();
+      // already YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      // common DD-MM-YYYY or DD/MM/YYYY => convert
+      if (/^\d{2}[-\/]\d{2}[-\/]\d{4}$/.test(s)) {
+        const parts = s.includes('/') ? s.split('/') : s.split('-');
+        const [dd, mm, yyyy] = parts;
+        return `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+      }
+      // fallback: try Date parsing
+      const dt = new Date(s);
+      if (!isNaN(dt.getTime())) return formatDateForInput(dt);
+      return null;
+    };
     const STATUS_ENDPOINTS = {
       charged: '/api/Canteen/order/paid',
       delivered: '/api/Canteen/order/delivered'
@@ -261,8 +293,10 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
       if (!STATUS_ENDPOINTS[statusKey]) return [];
       let url = '';
       if (statusKey === 'charged') {
-        // charged endpoint supports start/end query params in some backends
-        url = `${base}${STATUS_ENDPOINTS[statusKey]}?start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}&offset=${offset}&limit=${limit}`;
+        // charged endpoint supports start/end query params in some backends; include only if provided
+        url = `${base}${STATUS_ENDPOINTS[statusKey]}?offset=${offset}&limit=${limit}`;
+        if (startDate) url += `&start=${encodeURIComponent(startDate)}`;
+        if (endDate) url += `&end=${encodeURIComponent(endDate)}`;
       } else {
         url = `${base}${STATUS_ENDPOINTS[statusKey]}?offset=${offset}&limit=${limit}`;
       }
@@ -293,10 +327,12 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
       const base = import.meta.env.VITE_API_BASE_URL || '';
       const token = getToken();
       const headers = token ? { Authorization: token } : {};
-      // Format start and end as 'YYYY-MM-DD HH:mm' (URL encoded)
-      const start = encodeURIComponent(startDate);
-      const end = encodeURIComponent(endDate);
-      const url = `${base}/api/Canteen/order/list?offset=${offset}&limit=${limit}&start=${start}&end=${end}`;
+      // Format start and end as 'YYYY-MM-DD HH:mm' (URL encoded). Only include when provided.
+      const start = startDate ? encodeURIComponent(startDate) : '';
+      const end = endDate ? encodeURIComponent(endDate) : '';
+      let url = `${base}/api/Canteen/order/list?offset=${offset}&limit=${limit}`;
+      if (start) url += `&start=${start}`;
+      if (end) url += `&end=${end}`;
       const res = await fetch(url, { headers });
       const text = await res.text();
       let body = null; try { body = text ? JSON.parse(text) : null; } catch { body = text; }
@@ -325,37 +361,94 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
   const statusRaw = filters.status ?? 'All';
   const statusSel = Array.isArray(statusRaw) ? statusRaw.map(s => String(s).toLowerCase()) : [String(statusRaw).toLowerCase()];
         let normalizedAll = [];
-        if (statusSel.length === 1 && statusSel[0] === 'all') {
-          // fetch all orders with date filtering (paged)
-          const start = filters.startDate ? `${filters.startDate} 00:00` : '';
-          const end = filters.endDate ? `${filters.endDate} 23:59` : '';
-          const resp = await fetchAllOrdersList(start, end, page * pageSize, pageSize);
-          normalizedAll = resp.orders;
-          if (resp.meta && resp.meta.totalCount != null) setTotalCount(resp.meta.totalCount);
-        } else if (statusSel && !(statusSel.length === 1 && statusSel[0] === 'all')) {
-          // For specific status filters (e.g. 'delivered' or 'charged'),
-          // fetch a larger set from the list endpoint and apply strict client-side
-          // filtering so the first page contains matching items. This avoids
-          // relying on the backend page order which may mix statuses.
-          const start = filters.startDate ? `${filters.startDate} 00:00` : '';
-          const end = filters.endDate ? `${filters.endDate} 23:59` : '';
-          // fetch a reasonably large window (try to cover many matches)
-          const largeLimit = 1000;
-          const resp = await fetchAllOrdersList(start, end, 0, largeLimit);
-          let allFetched = resp.orders || [];
-          // canonicalize selected filter
-          // canonicalize selected filters into a set
-          const selectedCanonSet = new Set(statusSel.map(s => canonicalizeStatus(s) || s));
-          // keep orders where either paymentStatus or order status matches any selected
-          const matching = allFetched.filter(o => {
-            const payCanon = canonicalizeStatus(o.paymentStatus ?? o.raw?.paymentStatus ?? o.raw?.payment_status ?? o.raw?.payment ?? '');
-            const statCanon = canonicalizeStatus(o.status ?? o.raw?.status ?? '');
-            return selectedCanonSet.has(payCanon) || selectedCanonSet.has(statCanon);
+  const startNorm = normalizeFilterDate(filters.startDate);
+  const endNorm = normalizeFilterDate(filters.endDate);
+  const start = startNorm ? `${startNorm} 00:00` : '';
+  const end = endNorm ? `${endNorm} 23:59` : '';
+
+        const applyOrderTimeFilter = (list) => {
+          const sNorm = startNorm;
+          const eNorm = endNorm;
+          if (!sNorm && !eNorm) return list;
+          return (list || []).filter(o => {
+            const orderDateString = formatDateForInput(o.date);
+            if (sNorm && orderDateString < sNorm) return false;
+            if (eNorm && orderDateString > eNorm) return false;
+            return true;
           });
-          // set totalCount to number of matching orders
-          setTotalCount(matching.length);
-          // take page slice after filtering
-          normalizedAll = matching.slice(page * pageSize, (page + 1) * pageSize);
+        };
+
+        if (statusSel.length === 1 && statusSel[0] === 'all') {
+          // fetch all orders.
+          // If user provided a date range, do NOT pass start/end to the server
+          // (some backends filter by delivery time). Instead fetch the page window
+          // and apply order-time filtering client-side.
+          const resp = (startNorm || endNorm) ? await fetchAllOrdersList('', '', page * pageSize, pageSize) : await fetchAllOrdersList(start, end, page * pageSize, pageSize);
+          normalizedAll = applyOrderTimeFilter(resp.orders);
+          console.debug('[OrdersPage] fetched page window (all) count=', (resp.orders || []).length, 'after order-time filter count=', (normalizedAll || []).length, 'sample=', (normalizedAll || []).slice(0,5).map(o => ({ id: o.id, date: formatDateForInput(o.date), delivery: formatDateForInput(o.deliveryTime), rawKeys: Object.keys(o.raw || {}).slice(0,6) })));
+          if (resp.meta && resp.meta.totalCount != null && !(startNorm || endNorm)) setTotalCount(resp.meta.totalCount);
+        } else if (statusSel && !(statusSel.length === 1 && statusSel[0] === 'all')) {
+          // For specific status filters, prefer status-specific endpoints when a single
+          // status is selected and we have a dedicated endpoint (charged/paid or delivered).
+          const selectedCanonSet = new Set(statusSel.map(s => canonicalizeStatus(s) || s));
+          // If exactly one selected and it's charged or delivered use dedicated endpoint
+          if (statusSel.length === 1 && (selectedCanonSet.has('charged') || selectedCanonSet.has('delivered'))) {
+            const useKey = selectedCanonSet.has('charged') ? 'charged' : 'delivered';
+            try {
+              const largeLimit = 1000;
+              // If user supplied a date range, prefer the list endpoint because it returns order time consistently.
+              if (startNorm || endNorm) {
+                const resp = await fetchAllOrdersList(start, end, 0, largeLimit);
+                let fetched = resp.orders || [];
+                const filteredByTime = applyOrderTimeFilter(fetched).filter(o => {
+                  const payCanon = canonicalizeStatus(o.paymentStatus ?? o.raw?.paymentStatus ?? o.raw?.payment_status ?? o.raw?.payment ?? '');
+                  const statCanon = canonicalizeStatus(o.status ?? o.raw?.status ?? '');
+                  return selectedCanonSet.has(payCanon) || selectedCanonSet.has(statCanon);
+                });
+                filteredByTime.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                setTotalCount(filteredByTime.length);
+                normalizedAll = filteredByTime.slice(page * pageSize, (page + 1) * pageSize);
+                console.debug('[OrdersPage] fetched status endpoint window count=', fetched.length, 'after order-time filter count=', filteredByTime.length, 'sample=', (filteredByTime || []).slice(0,5).map(o => ({ id: o.id, date: formatDateForInput(o.date), delivery: formatDateForInput(o.deliveryTime), rawKeys: Object.keys(o.raw || {}).slice(0,6) })));
+              } else {
+                // No date filters: use the status endpoint but fetch a larger window and filter by order time.
+                const resp = await fetchOrdersForStatus(useKey, start, end, 0, largeLimit);
+                let fetched = resp.orders || [];
+                const filteredByTime = applyOrderTimeFilter(fetched).filter(o => {
+                  const payCanon = canonicalizeStatus(o.paymentStatus ?? o.raw?.paymentStatus ?? o.raw?.payment_status ?? o.raw?.payment ?? '');
+                  const statCanon = canonicalizeStatus(o.status ?? o.raw?.status ?? '');
+                  return selectedCanonSet.has(payCanon) || selectedCanonSet.has(statCanon);
+                });
+                filteredByTime.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+                setTotalCount(filteredByTime.length);
+                normalizedAll = filteredByTime.slice(page * pageSize, (page + 1) * pageSize);
+              }
+            } catch (e) {
+              console.warn('status endpoint/list fallback failed:', e);
+            }
+          }
+
+          if (!normalizedAll || normalizedAll.length === 0) {
+            // Fallback: fetch a larger set from the list endpoint and apply strict client-side
+            // filtering so the first page contains matching items. This avoids relying on the
+            // backend page order which may mix statuses.
+            const largeLimit = 1000;
+                // When date range provided, request an unfiltered window and filter by order time
+                const resp = (startNorm || endNorm) ? await fetchAllOrdersList('', '', 0, largeLimit) : await fetchAllOrdersList(start, end, 0, largeLimit);
+            let allFetched = resp.orders || [];
+            console.debug('[OrdersPage] fetched list window count=', allFetched.length, 'sample raw keys=', (allFetched || []).slice(0,3).map(o => ({ id: o.id, date: formatDateForInput(o.date), delivery: formatDateForInput(o.deliveryTime), rawKeys: Object.keys(o.raw || {}).slice(0,6) })));
+            // keep orders where either paymentStatus or order status matches any selected
+            const matching = allFetched.filter(o => {
+              const payCanon = canonicalizeStatus(o.paymentStatus ?? o.raw?.paymentStatus ?? o.raw?.payment_status ?? o.raw?.payment ?? '');
+              const statCanon = canonicalizeStatus(o.status ?? o.raw?.status ?? '');
+              return selectedCanonSet.has(payCanon) || selectedCanonSet.has(statCanon);
+            });
+            // apply order-time range filter
+            const matchingFiltered = applyOrderTimeFilter(matching);
+            // set totalCount to number of matching orders after order-time filtering
+            setTotalCount(matchingFiltered.length);
+            // take page slice after filtering
+            normalizedAll = matchingFiltered.slice(page * pageSize, (page + 1) * pageSize);
+          }
         } else {
           normalizedAll = []; // unknown status
         }
@@ -493,11 +586,13 @@ const OrdersPage = ({ onLogout, navigateTo, currentPage }) => {
     // Sort by ascending date and time
     filtered.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-    // Date filtering still applies
+    // Date filtering still applies (use normalized filter dates)
+    const sNorm = normalizeFilterDate(filters.startDate);
+    const eNorm = normalizeFilterDate(filters.endDate);
     return filtered.filter(order => {
       const orderDateString = formatDateForInput(order.date);
-      if (filters.startDate && orderDateString < filters.startDate) return false;
-      if (filters.endDate && orderDateString > filters.endDate) return false;
+      if (sNorm && orderDateString < sNorm) return false;
+      if (eNorm && orderDateString > eNorm) return false;
       return true;
     });
   }, [orders, filters]);
